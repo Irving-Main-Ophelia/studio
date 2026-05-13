@@ -44,7 +44,7 @@
     <word-font font-family="Times" font-size="6.5" />
   </defaults>
   <credit page="1">
-    <credit-words default-x="803" default-y="1909" font-family="Slimbach Medium" font-size="9.1" justify="center" valign="top">BWV 1.6  Wie schšn leuchtet der Morgenstern</credit-words>
+    <credit-words default-x="803" default-y="1909" font-family="Slimbach Medium" font-size="9.1" justify="center" valign="top">BWV 1.6  Wie schön leuchtet der Morgenstern</credit-words>
   </credit>
   <credit page="1">
     <credit-words default-x="211" default-y="1844" font-family="Helvetica" font-size="5.9" valign="top">Harmonized by J.S. Bach</credit-words>
@@ -57,7 +57,7 @@ www.jsbchorales.net</credit-words>
     <score-part id="P1">
       <part-name>Horn 2</part-name>
       <part-abbreviation>Hn 2</part-abbreviation>
-      <score-instrument id="If92a892d202f60e2a6c82aac7e22792d">
+      <score-instrument id="I841ae3b7aa90156e9e7aa5c9561f37cd">
         <instrument-name>Instrument 7</instrument-name>
       </score-instrument>
     </score-part>
@@ -68,28 +68,28 @@ www.jsbchorales.net</credit-words>
     <score-part id="P2">
       <part-name>Soprano</part-name>
       <part-abbreviation>S</part-abbreviation>
-      <score-instrument id="Ie5630ae80f9d408fee8d9890c271428b">
+      <score-instrument id="Ia75f16db758c91d38d2a57a46fad501c">
         <instrument-name>Instrument 1</instrument-name>
       </score-instrument>
     </score-part>
     <score-part id="P3">
       <part-name>Alto</part-name>
       <part-abbreviation>A</part-abbreviation>
-      <score-instrument id="I21868dd68b72fd073f90a540e5710995">
+      <score-instrument id="I171880fa1cae3ccc8d3858da9b9d97e9">
         <instrument-name>Instrument 2</instrument-name>
       </score-instrument>
     </score-part>
     <score-part id="P4">
       <part-name>Tenor</part-name>
       <part-abbreviation>T</part-abbreviation>
-      <score-instrument id="I85b4aa4b2bf24ae4945708bcb064eb9e">
+      <score-instrument id="Ia4f9c12b70d5596e2e121fd2de05dc10">
         <instrument-name>Instrument 3</instrument-name>
       </score-instrument>
     </score-part>
     <score-part id="P5">
       <part-name>Bass</part-name>
       <part-abbreviation>B</part-abbreviation>
-      <score-instrument id="Idad9ac6ce90de98dbccfa52fcb327fde">
+      <score-instrument id="I929d7ffd3a5a95826398223ee152f90e">
         <instrument-name>Instrument 4</instrument-name>
       </score-instrument>
     </score-part>

@@ -28,11 +28,38 @@ from music21 import (
 FIXTURES_DIR = Path(__file__).resolve().parents[2] / "apps" / "desktop" / "public" / "fixtures"
 FIXTURES_DIR.mkdir(parents=True, exist_ok=True)
 
+# The music21 corpus ships some legacy .mxl files whose embedded credit-words
+# text was written with MacRoman bytes but declared as UTF-8. When music21
+# re-emits MusicXML, the same mojibake propagates. We fix the known cases by
+# substitution after the fact. Add new pairs here if more turn up.
+MOJIBAKE_FIXES: dict[str, str] = {
+    "schšn": "schön",
+    "Schšn": "Schön",
+    "kšn": "kön",  # könig
+    "Šber": "Über",
+    "FŸr": "Für",
+    "fŸr": "für",
+    "GrŸ": "Grü",
+    "grŸ": "grü",
+    "Šnd": "änd",
+    "Šch": "äch",
+}
+
+
+def _sanitize_mojibake(xml_text: str) -> str:
+    out = xml_text
+    for bad, good in MOJIBAKE_FIXES.items():
+        out = out.replace(bad, good)
+    return out
+
 
 def _write(score: stream.Score, name: str) -> None:
     target = FIXTURES_DIR / f"{name}.musicxml"
-    tmp = score.write("musicxml")
-    Path(tmp).rename(target)
+    tmp = Path(score.write("musicxml"))
+    xml_text = tmp.read_text(encoding="utf-8")
+    cleaned = _sanitize_mojibake(xml_text)
+    target.write_text(cleaned, encoding="utf-8")
+    tmp.unlink(missing_ok=True)
     print(f"  wrote {target.relative_to(Path.cwd())}")
 
 
