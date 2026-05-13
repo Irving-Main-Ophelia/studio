@@ -134,16 +134,19 @@ function ChatTurnView({ turn }: { turn: ChatTurn }) {
 
 function ToolCallCard({ call }: { call: ToolCallRecord }) {
   const summary = (() => {
-    if (call.tool === "theory.analyze_key") {
+    if (call.tool === "theory_analyze_key") {
       const out = call.output as { key?: string; mode?: string; confidence?: number } | undefined;
       if (out?.key) return `${out.key} ${out.mode} (conf ${Math.round((out.confidence ?? 0) * 100)}%)`;
     }
-    if (call.tool === "score.transpose") {
+    if (call.tool === "score_transpose") {
       const out = call.output as { from_key?: string; to_key?: string; interval?: string } | undefined;
       if (out?.to_key) return `${out.from_key} → ${out.to_key} (${out.interval})`;
     }
     return call.error ? "error" : "ok";
   })();
+
+  // Render namespaces as dots for human reading: "theory.analyze_key".
+  const pretty = call.tool.replace(/_/, ".");
 
   return (
     <div
@@ -156,7 +159,7 @@ function ToolCallCard({ call }: { call: ToolCallRecord }) {
     >
       <div className="flex items-center gap-1.5">
         <Wrench size={10} />
-        <span className="font-mono">{call.tool}</span>
+        <span className="font-mono">{pretty}</span>
         <span className="ml-auto text-zinc-400">{summary}</span>
       </div>
     </div>

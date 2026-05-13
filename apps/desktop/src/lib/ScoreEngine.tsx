@@ -193,7 +193,7 @@ export function ScoreEngineProvider({ children }: { children: React.ReactNode })
 
         // If a transposition tool ran, refresh the score.
         const transposeCall = reply.tool_calls.find(
-          (c) => c.tool === "score.transpose" && !c.error,
+          (c) => c.tool === "score_transpose" && !c.error,
         );
         if (transposeCall && score) {
           const output = transposeCall.output as { musicxml?: string } | undefined;

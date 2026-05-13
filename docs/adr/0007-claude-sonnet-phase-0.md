@@ -18,7 +18,10 @@ based on task. Phase 0 keeps it simple.
 
 ## Decision
 
-**Claude Sonnet 4.6 (`claude-sonnet-4-6-20251022`)** for every Phase 0 agent call.
+**Claude Sonnet 4.6 (`claude-sonnet-4-6`)** for every Phase 0 agent call.
+
+> The model ID uses the dateless format Anthropic adopted with the 4.6
+> generation. Pin via the `ANTHROPIC_MODEL` env var to override.
 
 ## Alternatives considered
 

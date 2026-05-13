@@ -26,9 +26,11 @@ SYSTEM_PROMPT = (
     "- Never invent notes. Only call tools that produce verifiable edits."
 )
 
+# Anthropic constrains tool names to ^[a-zA-Z0-9_-]{1,64}$ — no dots.
+# We keep namespaces as underscores. The UI prettifies these back to dots.
 TOOLS: list[dict[str, Any]] = [
     {
-        "name": "theory.analyze_key",
+        "name": "theory_analyze_key",
         "description": (
             "Estimate the tonal center of a MusicXML score using "
             "Krumhansl-Schmuckler. Returns the key, mode, and confidence."
@@ -45,7 +47,7 @@ TOOLS: list[dict[str, Any]] = [
         },
     },
     {
-        "name": "score.transpose",
+        "name": "score_transpose",
         "description": (
             "Transpose a MusicXML score to a target key. Returns the new "
             "MusicXML plus the source key, target key, and interval."
@@ -91,9 +93,9 @@ class AnthropicAgent:
         return self._client
 
     def _run_tool(self, name: str, args: dict[str, Any]) -> Any:
-        if name == "theory.analyze_key":
+        if name == "theory_analyze_key":
             return analyze_key(args.get("musicxml", ""))
-        if name == "score.transpose":
+        if name == "score_transpose":
             return transpose_musicxml(
                 args.get("musicxml", ""),
                 args.get("target_key", "C"),

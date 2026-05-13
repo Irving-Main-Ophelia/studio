@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     """Local-only agent service settings."""
 
     anthropic_api_key: str = ""
-    anthropic_model: str = "claude-sonnet-4-6-20251022"
+    anthropic_model: str = "claude-sonnet-4-6"
 
     stockhausen_agent_host: str = "127.0.0.1"
     stockhausen_agent_port: int = 8000
