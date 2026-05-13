@@ -34,7 +34,9 @@ pub async fn open_score_file(app: AppHandle) -> Result<Option<OpenedScore>, Stri
         .add_filter("MusicXML", &["musicxml", "xml", "mxl"])
         .blocking_pick_file();
 
-    let Some(path) = path_opt else { return Ok(None) };
+    let Some(path) = path_opt else {
+        return Ok(None);
+    };
 
     let Some(real_path) = path.as_path() else {
         return Err("Could not resolve the picked file path.".to_string());

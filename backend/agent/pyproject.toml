@@ -41,10 +41,20 @@ target-version = "py312"
 select = ["E", "F", "I", "N", "UP", "B", "A", "C4", "RET", "SIM", "TID", "ARG", "PL"]
 ignore = ["PLR0913"]
 
+[tool.ruff.lint.per-file-ignores]
+# PLR2004 (magic values) is noisy for assertions like `status_code == 200`.
+"tests/*" = ["PLR2004"]
+
 [tool.mypy]
 python_version = "3.12"
 strict = true
 warn_unused_configs = true
+
+# music21 and partitura ship without type stubs; vendor an `Any` for them so
+# strict mode applies to our own code, not to upstream libraries.
+[[tool.mypy.overrides]]
+module = ["music21", "music21.*"]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

@@ -17,13 +17,13 @@ from music21 import converter, interval, key, stream, tempo
 
 
 def _parse(musicxml: str) -> stream.Score:
-    score = converter.parseData(musicxml, format="musicxml")
-    if not isinstance(score, stream.Score):
-        # music21 sometimes returns Part for single-part fragments; lift to Score.
-        wrapped = stream.Score()
-        wrapped.insert(0, score)
-        score = wrapped
-    return score
+    parsed = converter.parseData(musicxml, format="musicxml")
+    if isinstance(parsed, stream.Score):
+        return parsed
+    # music21 sometimes returns Part for single-part fragments; lift to Score.
+    wrapped = stream.Score()
+    wrapped.insert(0, parsed)  # type: ignore[no-untyped-call]
+    return wrapped
 
 
 def analyze_key(musicxml: str) -> dict[str, Any]:
@@ -130,6 +130,7 @@ def extract_notes(musicxml: str) -> dict[str, Any]:
     notes: list[dict[str, Any]] = []
     parts = list(score.parts) if score.parts else [score]
     max_end = 0.0
+    default_velocity = 90
     for part_index, part in enumerate(parts):
         for element in part.flatten().notes:
             start_quarter = float(element.offset)
@@ -139,10 +140,9 @@ def extract_notes(musicxml: str) -> dict[str, Any]:
             start_sec = start_quarter * quarter_sec
             duration_sec = dur_quarter * quarter_sec
             max_end = max(max_end, start_sec + duration_sec)
-            if element.isChord:
-                pitches = element.pitches
-            else:
-                pitches = [element.pitch]
+            pitches = (
+                list(element.pitches) if element.isChord else [element.pitch]  # type: ignore[attr-defined]
+            )
             for p in pitches:
                 notes.append(
                     {
@@ -150,7 +150,7 @@ def extract_notes(musicxml: str) -> dict[str, Any]:
                         "start_sec": round(start_sec, 4),
                         "duration_sec": round(duration_sec, 4),
                         "part_index": part_index,
-                        "velocity": 90,
+                        "velocity": default_velocity,
                     }
                 )
 

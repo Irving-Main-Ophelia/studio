@@ -5,10 +5,12 @@ Phase 0 ships one tool: ``theory.analyze_key``. We add more in Phase 1.
 
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from app.llm.anthropic_client import AnthropicAgent, AgentReply
+from app.llm.anthropic_client import AgentReply, AnthropicAgent
 
 router = APIRouter(tags=["agent"])
 
@@ -28,7 +30,7 @@ class ChatRequest(BaseModel):
 
 class ChatResponse(BaseModel):
     reply: str
-    tool_calls: list[dict]
+    tool_calls: list[dict[str, Any]]
 
 
 @router.post("/agent/chat", response_model=ChatResponse)

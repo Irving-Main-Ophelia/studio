@@ -13,9 +13,7 @@ from fastapi.testclient import TestClient
 
 from app.main import create_app
 
-FIXTURES = (
-    Path(__file__).resolve().parents[3] / "apps" / "desktop" / "public" / "fixtures"
-)
+FIXTURES = Path(__file__).resolve().parents[3] / "apps" / "desktop" / "public" / "fixtures"
 
 
 @pytest.fixture()
@@ -64,9 +62,7 @@ def test_transpose_inherits_source_mode(client: TestClient, bach_musicxml: str) 
 
 
 def test_transpose_explicit_major(client: TestClient, bach_musicxml: str) -> None:
-    res = client.post(
-        "/transpose", json={"musicxml": bach_musicxml, "target_key": "G major"}
-    )
+    res = client.post("/transpose", json={"musicxml": bach_musicxml, "target_key": "G major"})
     assert res.status_code == 200
     body = res.json()
     assert "G major" in body["to_key"]
