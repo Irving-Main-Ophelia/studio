@@ -1,0 +1,25 @@
+{
+  "name": "stockhausen",
+  "version": "0.0.1",
+  "private": true,
+  "description": "AI-native composition environment for classical music and song-writing.",
+  "license": "UNLICENSED",
+  "packageManager": "pnpm@10.13.1",
+  "engines": {
+    "node": ">=22.0.0",
+    "pnpm": ">=10.0.0"
+  },
+  "scripts": {
+    "dev": "pnpm --filter @stockhausen/desktop dev",
+    "build": "pnpm --filter @stockhausen/desktop build",
+    "tauri:dev": "pnpm --filter @stockhausen/desktop tauri dev",
+    "tauri:build": "pnpm --filter @stockhausen/desktop tauri build",
+    "backend:dev": "cd backend/agent && uv run uvicorn app.main:app --reload --port 8000",
+    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md,css,html}\" --ignore-path .gitignore",
+    "lint": "pnpm --recursive lint",
+    "typecheck": "pnpm --recursive typecheck"
+  },
+  "devDependencies": {
+    "prettier": "^3.4.2"
+  }
+}

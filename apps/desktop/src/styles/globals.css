@@ -1,0 +1,74 @@
+@import "./tokens.css";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html,
+  body,
+  #root {
+    @apply h-full;
+    margin: 0;
+  }
+
+  body {
+    @apply bg-obsidian-900 text-zinc-100 antialiased;
+    font-family:
+      "Geist",
+      "Inter Display",
+      system-ui,
+      -apple-system,
+      BlinkMacSystemFont,
+      sans-serif;
+    font-feature-settings:
+      "ss01",
+      "cv11";
+  }
+
+  /* Numerals and technical readouts */
+  .num {
+    font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+    font-variant-numeric: tabular-nums lining-nums;
+  }
+
+  /* Italic-serif moments — epigraphs, quotes */
+  .musical {
+    font-family: "Cormorant Garamond", ui-serif, Georgia, serif;
+    font-style: italic;
+  }
+
+  /* macOS-style title-bar drag region */
+  .drag-region {
+    -webkit-app-region: drag;
+  }
+  .no-drag {
+    -webkit-app-region: no-drag;
+  }
+
+  ::selection {
+    background-color: rgba(255, 46, 136, 0.35);
+    color: #fff;
+  }
+
+  /* Honor reduced motion preferences */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+@layer components {
+  .glass-panel {
+    background-color: var(--glass-bg);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    border: 1px solid var(--glass-border);
+  }
+}

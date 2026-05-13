@@ -21,7 +21,7 @@ build/
 target/
 **/*.rs.bk
 src-tauri/target/
-src-tauri/Cargo.lock
+# Note: we DO commit src-tauri/Cargo.lock for reproducible app builds.
 
 # Python
 __pycache__/
@@ -30,11 +30,11 @@ __pycache__/
 .venv/
 venv/
 env/
-.python-version
 *.egg-info/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+# Note: we commit .python-version to pin the interpreter (uv uses it).
 
 # Audio / artifacts
 *.wav

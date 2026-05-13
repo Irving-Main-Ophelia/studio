@@ -97,6 +97,42 @@ stockhausen/
 
 ---
 
+## Quickstart (Phase 0, macOS Apple Silicon)
+
+Prerequisites: Node 22 + pnpm 10 + Rust 1.80+ + Python 3.12+ + `uv`.
+
+```bash
+# 1. Install dependencies
+pnpm install                       # frontend + workspace
+cd backend/agent && uv sync && cd ../..
+
+# 2. Configure the Anthropic key (only needed for the chat agent)
+cp backend/agent/.env.example backend/agent/.env
+# Edit backend/agent/.env and set ANTHROPIC_API_KEY=sk-ant-...
+
+# 3. Run the agent backend (one terminal)
+pnpm backend:dev
+#   → http://127.0.0.1:8000/health
+
+# 4. Run the desktop app (another terminal)
+pnpm tauri:dev
+#   → Stockhausen window opens with the splash + 3-pane shell.
+```
+
+To run only frontend tests / typecheck:
+
+```bash
+pnpm --filter @stockhausen/desktop typecheck
+```
+
+Backend tests:
+
+```bash
+cd backend/agent && uv run pytest -q
+```
+
+---
+
 ## How decisions get made
 
 1. **Read** [`NORTH_STAR.md`](./NORTH_STAR.md) §1–§5 (Vision, Principles, Pillars, Non-Goals).

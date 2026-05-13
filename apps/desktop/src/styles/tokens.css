@@ -1,0 +1,38 @@
+/**
+ * Stockhausen design tokens as CSS variables.
+ * Mirrors tailwind.config.ts.
+ *
+ * Source of truth: docs/UI_DESIGN.md
+ */
+
+:root {
+  --obsidian-900: #06080f;
+  --obsidian-800: #0b0f1c;
+  --obsidian-700: #121830;
+  --obsidian-600: #1b2240;
+  --obsidian-500: #27305b;
+
+  --neon-magenta: #ff2e88;
+  --neon-cyan: #00e5ff;
+  --neon-violet: #a45bff;
+  --neon-amber: #ffb840;
+  --neon-emerald: #28f0a0;
+  --danger: #ff4e4e;
+
+  --score-parchment: #f4ecd8;
+  --score-ink: #0f1322;
+  --score-grid: #d9cfb8;
+  --score-night-bg: #0b0f1c;
+  --score-night-ink: #e9ecf6;
+
+  --accent-primary: var(--neon-magenta);
+  --accent-secondary: var(--neon-cyan);
+  --accent-tertiary: var(--neon-violet);
+  --success: var(--neon-emerald);
+  --warning: var(--neon-amber);
+
+  --glass-bg: rgba(11, 15, 28, 0.62);
+  --glass-border: rgba(164, 91, 255, 0.18);
+
+  --ease-signature: cubic-bezier(0.32, 0.72, 0, 1);
+}
