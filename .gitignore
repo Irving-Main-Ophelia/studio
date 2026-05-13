@@ -1,0 +1,85 @@
+# macOS
+.DS_Store
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+.cursor/
+
+# Node / Bun
+node_modules/
+.pnp.*
+.yarn/
+dist/
+.next/
+build/
+.turbo/
+.cache/
+
+# Rust / Tauri
+target/
+**/*.rs.bk
+src-tauri/target/
+src-tauri/Cargo.lock
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+.python-version
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Audio / artifacts
+*.wav
+*.mp3
+*.aiff
+*.flac
+*.ogg
+!**/fixtures/**/*.wav
+!**/fixtures/**/*.mp3
+
+# Model weights & big data
+models/
+*.onnx
+*.pt
+*.safetensors
+*.bin
+data/raw/
+data/processed/
+
+# Local secrets & env
+.env
+.env.*
+!.env.example
+
+# Logs
+logs/
+*.log
+
+# Sample libraries (too big for VCS)
+samples/
+soundfonts/
+*.sf2
+*.sf3
+*.sfz
+!**/fixtures/**/*.sfz
+
+# Build outputs
+*.dmg
+*.exe
+*.msi
+*.deb
+*.AppImage
+
+# Tauri
+src-tauri/gen/
+
+# OS junk
+Thumbs.db
