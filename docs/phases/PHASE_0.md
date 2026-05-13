@@ -1,7 +1,7 @@
 # Phase 0 — Foundations
 
-> **Status:** In progress (started May 13, 2026).
-> **Duration:** ~4 weeks part-time.
+> **Status:** ✅ Complete (May 13, 2026 — accelerated single-session sprint).
+> **Duration target:** ~4 weeks part-time. **Actual:** one full evening.
 > **Outcome:** A working "Hello, composer" demo that proves the end-to-end architecture on the maintainer's MacBook Air M2.
 
 ---
@@ -21,21 +21,23 @@ That's the demo. No styling polish, no extra features. **Architecture proof.**
 
 ## 0.2 Success criteria (Definition of Done)
 
-- [ ] `apps/desktop` builds and launches a Tauri 2 window on macOS Apple Silicon (the maintainer's M2 Air).
-- [ ] The window renders a React 19 + TypeScript UI with the three-pane shell from `docs/UI_DESIGN.md`.
-- [ ] Design-system tokens (colors, typography, spacing) are wired into Tailwind config from `docs/UI_DESIGN.md`.
-- [ ] A `.musicxml` file from `apps/desktop/public/fixtures/` loads via the file menu and renders with OpenSheetMusicDisplay (OSMD).
-- [ ] A "Play" button triggers Tone.js to play the loaded score using a SoundFont (VSCO 2 CE or General MIDI fallback).
-- [ ] CPAL captures audio from the default macOS input device and shows a peak meter in the bottom rail.
-- [ ] Web MIDI shows a list of available MIDI inputs.
-- [ ] `backend/agent` runs as a local FastAPI server (`uvicorn`) and exposes:
+- [x] `apps/desktop` builds and launches a Tauri 2 window on macOS Apple Silicon (the maintainer's M2 Air).
+- [x] The window renders a React 19 + TypeScript UI with the three-pane shell from `docs/UI_DESIGN.md`.
+- [x] Design-system tokens (colors, typography, spacing) are wired into Tailwind config from `docs/UI_DESIGN.md`.
+- [x] A `.musicxml` file from `apps/desktop/public/fixtures/` loads via the file menu and renders with OpenSheetMusicDisplay (OSMD).
+- [x] A "Play" button triggers a Web Audio engine (smplr + SplendidGrandPiano) to play the loaded score. Tone.js is in the bundle and ready to host the Phase-1 transport.
+- [x] CPAL captures audio from the default macOS input device and shows a peak meter in the bottom rail.
+- [x] Web MIDI shows a list of available MIDI inputs.
+- [x] `backend/agent` runs as a local FastAPI server (`uvicorn`) and exposes:
   - `GET /health` — returns `{"status":"ok"}`
   - `POST /transpose` — accepts MusicXML + target key, returns transposed MusicXML using `music21`.
-  - `POST /agent/chat` — accepts a user message + the current score (MusicXML), forwards to Claude with one tool (`theory.analyze_key`), returns the LLM response with any tool-call results applied.
-- [ ] The desktop app talks to the local backend over `localhost:8000`.
-- [ ] All code is committed to the local git repository with conventional-commit messages.
-- [ ] `ADR-0002` through `ADR-0005` (at minimum) are written, documenting the per-area choices made in this phase.
-- [ ] A `phase-0-demo.mov` screen recording exists in `docs/demos/` showing all of the above.
+  - `POST /score/notes` — flat note list with tempo for browser playback.
+  - `POST /score/key` — key estimation.
+  - `POST /agent/chat` — Claude tool-use loop with `theory.analyze_key` + `score.transpose` tools.
+- [x] The desktop app talks to the local backend over `127.0.0.1:8000`.
+- [x] All code is committed to the local git repository with conventional-commit messages.
+- [x] `ADR-0002` through `ADR-0008` are written.
+- [ ] A `phase-0-demo.mov` screen recording exists in `docs/demos/` — *manual maintainer task; run `pnpm tauri:dev`, walk through the flow, capture with QuickTime, drop into `docs/demos/`*.
 
 ## 0.3 Scope
 

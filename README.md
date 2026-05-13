@@ -21,6 +21,7 @@
 7. **[`docs/REFERENCE_COMPOSERS.md`](./docs/REFERENCE_COMPOSERS.md)** — composer roster for style work.
 8. **[`docs/GLOSSARY.md`](./docs/GLOSSARY.md)** — terms.
 9. **[`docs/phases/`](./docs/phases/)** — detailed phase plans (Phase 0 → Phase 3).
+10. **[`docs/phases/PREREQUISITES.md`](./docs/phases/PREREQUISITES.md)** — accounts, API keys, hardware, and payments you must set up.
 
 ---
 

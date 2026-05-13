@@ -6,7 +6,10 @@
 use serde::Serialize;
 use tracing::info;
 
+mod audio;
 mod commands;
+
+use audio::AudioMeter;
 
 #[derive(Serialize)]
 pub struct AppInfo {
@@ -38,9 +41,14 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
+        .manage(AudioMeter::default())
         .invoke_handler(tauri::generate_handler![
             app_info,
-            commands::ping
+            commands::ping,
+            commands::open_score_file,
+            commands::start_input_meter,
+            commands::stop_input_meter,
+            commands::input_meter_status,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

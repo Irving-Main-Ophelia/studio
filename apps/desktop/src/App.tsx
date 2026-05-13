@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 
 import { Shell } from "./shell/Shell";
 import { NorthStar } from "./shell/NorthStar";
+import { ScoreEngineProvider } from "./lib/ScoreEngine";
 
 interface AppInfo {
   name: string;
@@ -13,7 +14,7 @@ interface AppInfo {
 /**
  * The app entry. Holds bootstrap state and renders either:
  *  - the loading splash (the slow-pulsing north-star),
- *  - or the main three-pane shell.
+ *  - or the main three-pane shell, wrapped in the score engine.
  *
  * See docs/UI_DESIGN.md §13 for the first-screen experience spec.
  */
@@ -21,25 +22,28 @@ export function App() {
   const [info, setInfo] = useState<AppInfo | null>(null);
 
   useEffect(() => {
+    const start = Date.now();
     invoke<AppInfo>("app_info")
-      .then((value) => {
-        // brief minimum splash so the star is seen
-        const start = Date.now();
-        const minSplashMs = 900;
-        const elapsed = Date.now() - start;
-        const wait = Math.max(0, minSplashMs - elapsed);
-        window.setTimeout(() => setInfo(value), wait);
-      })
       .catch((err) => {
         console.error("failed to load app_info from native core:", err);
-        setInfo({ name: "Stockhausen", version: "0.0.1", phase: "0" });
+        return { name: "Stockhausen", version: "0.0.1", phase: "0" };
+      })
+      .then((value) => {
+        const elapsed = Date.now() - start;
+        const wait = Math.max(0, 900 - elapsed);
+        window.setTimeout(() => setInfo(value), wait);
       });
   }, []);
 
   if (!info) {
     return <Splash />;
   }
-  return <Shell info={info} />;
+
+  return (
+    <ScoreEngineProvider>
+      <Shell info={info} />
+    </ScoreEngineProvider>
+  );
 }
 
 function Splash() {

@@ -11,23 +11,26 @@ from typing import Any
 from anthropic import AsyncAnthropic
 
 from app.config import get_settings
-from app.tools.theory import analyze_key
+from app.tools.theory import analyze_key, transpose_musicxml
 
 SYSTEM_PROMPT = (
     "You are the Stockhausen co-composer. You assist a classically trained "
     "musician. You are precise, theory-aware, and concise.\n\n"
     "Rules:\n"
     "- Use the provided tools rather than guessing.\n"
-    "- When you call `theory.analyze_key`, pass the current score MusicXML.\n"
-    "- Reply in the user's language. Keep replies under 80 words unless asked.\n"
-    "- Never invent notes; only call tools that produce verifiable edits."
+    "- The user's current score is attached at the end of their message as MusicXML.\n"
+    "  When a tool needs `musicxml`, copy that attached MusicXML verbatim.\n"
+    "- For transposition, target keys can be written 'Gm', 'F#m', 'Bb', 'A major', etc.\n"
+    "- Reply in the user's language (Spanish or English). Keep replies tight: at most\n"
+    "  three sentences unless explicitly asked to elaborate.\n"
+    "- Never invent notes. Only call tools that produce verifiable edits."
 )
 
 TOOLS: list[dict[str, Any]] = [
     {
         "name": "theory.analyze_key",
         "description": (
-            "Analyze the tonal center of the current MusicXML score using "
+            "Estimate the tonal center of a MusicXML score using "
             "Krumhansl-Schmuckler. Returns the key, mode, and confidence."
         ),
         "input_schema": {
@@ -39,6 +42,27 @@ TOOLS: list[dict[str, Any]] = [
                 }
             },
             "required": ["musicxml"],
+        },
+    },
+    {
+        "name": "score.transpose",
+        "description": (
+            "Transpose a MusicXML score to a target key. Returns the new "
+            "MusicXML plus the source key, target key, and interval."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "musicxml": {
+                    "type": "string",
+                    "description": "Full MusicXML 4.0 score to transpose.",
+                },
+                "target_key": {
+                    "type": "string",
+                    "description": "Target key: 'F#m', 'Bb', 'A major', etc.",
+                },
+            },
+            "required": ["musicxml", "target_key"],
         },
     },
 ]
@@ -69,6 +93,11 @@ class AnthropicAgent:
     def _run_tool(self, name: str, args: dict[str, Any]) -> Any:
         if name == "theory.analyze_key":
             return analyze_key(args.get("musicxml", ""))
+        if name == "score.transpose":
+            return transpose_musicxml(
+                args.get("musicxml", ""),
+                args.get("target_key", "C"),
+            )
         raise ValueError(f"Unknown tool: {name}")
 
     async def respond(

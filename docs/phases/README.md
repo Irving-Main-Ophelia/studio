@@ -4,10 +4,11 @@
 
 | Phase | Outcome | Doc |
 |---|---|---|
-| 0 | "Hello, composer" — Tauri shell, OSMD, Tone.js, CPAL, MIDI, FastAPI, Claude with one tool | [`PHASE_0.md`](./PHASE_0.md) |
+| 0 | "Hello, composer" — Tauri shell, OSMD, smplr playback, CPAL meter, Web MIDI, FastAPI, Claude with two tools | [`PHASE_0.md`](./PHASE_0.md) |
 | 1 | Composer's Sketchpad — daily-use composing for piano/chamber + chat agent (10 tools) + theory tutor | [`PHASE_1.md`](./PHASE_1.md) |
 | 2 | Guitar in, Agent out — live guitar→score, orchestration changer, world-music packs, 30 tools, MP3 reverse-engineering | [`PHASE_2.md`](./PHASE_2.md) |
 | 3 | Co-Composer & Style — composer adapters, multi-agent, practice coach, production exports, optional voice | [`PHASE_3.md`](./PHASE_3.md) |
+| — | Prerequisites — accounts, keys, payments, hardware (all phases) | [`PREREQUISITES.md`](./PREREQUISITES.md) |
 
 ## How to work a phase
 
