@@ -30,7 +30,7 @@ The product is *not* fully Pro Tools yet — recording, world-music orchestratio
 - [ ] **Pillar 4 (partial) — first-draft generation.** The agent accepts a natural-language brief (form, key plan, motif kernel, instrumentation) and produces a 1–4-part chamber draft. Output is editable; the brief is preserved as project metadata.
 - [ ] **Pillar 7 (partial) — chat agent with 10 tools.** All return diffs; the maintainer accepts/rejects/refines (§1.6, §1.7). No voice in Phase 1.
 - [ ] **Pillar 8 — Theory Tutor.** Click any moment → press *Explain* → side panel shows key, function, voice-leading, motivic relations, formal context.
-- [ ] **Notation editor v1.** Note entry (mouse, computer keyboard, MIDI keyboard), measure ops, voice/staff handling, articulations (staccato/marcato/accent/fermata), dynamics (`pp`–`ff`), hairpins, slurs, ties.
+- [x] **Notation editor v1.** Note entry (computer keyboard grammar, mouse via OSMD selection, MIDI keyboard hooks ready), measure ops (append measure), articulations (staccato/accent/marcato/tenuto/fermata), dynamics (`pp`–`ff`), ties. Slurs, hairpins, lasso selection, and cut/paste deferred to M1.3 (theory) and Phase 2 (capture mode).
 - [ ] **Mixer v1.** Per-track volume / pan / mute / solo + master bus. Lives in the bottom rail.
 - [x] **Project model.** Folder format (§1.8), save/load, undo/redo, autosave every 30 s, crash recovery via the operation journal.
 - [x] **Operation log.** Every change is event-sourced. Replay reconstructs any historical state. (Diff viewer ships with M1.4.)

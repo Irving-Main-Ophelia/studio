@@ -1,5 +1,6 @@
 import { useState } from "react";
 
+import { useEditorKeyboard } from "../editor/useEditorKeyboard";
 import { useScoreEngine } from "../lib/ScoreEngine";
 import { useKeyboardShortcuts } from "../lib/useKeyboardShortcuts";
 import { NewProjectDialog } from "../project/NewProjectDialog";
@@ -32,6 +33,10 @@ interface AppInfo {
 export function Shell({ info }: { info: AppInfo }) {
   const engine = useScoreEngine();
   const [newDialog, setNewDialog] = useState(false);
+
+  // Editor keyboard listener: only active when a project is open and no
+  // ⌘-bound shortcut is firing.
+  useEditorKeyboard(Boolean(engine.project));
 
   useKeyboardShortcuts([
     { key: "n", meta: true, handler: () => setNewDialog(true) },

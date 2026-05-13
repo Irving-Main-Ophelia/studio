@@ -18,7 +18,28 @@ import {
 } from "react";
 
 import { Player, type PlayerStatus } from "../audio/Player";
-import { OperationLogState, buildScoreTransposeOp } from "../project/OperationLog";
+import type { EditorState } from "../editor/EditorState";
+import {
+  advanceCursor,
+  bumpOctave,
+  clearPendingTie,
+  initialEditorState,
+  markInserted,
+  moveCursor,
+  setDuration,
+  setPendingTie,
+  toggleDot,
+} from "../editor/EditorState";
+import {
+  buildSciPitch,
+  type EditorIntent,
+  resolveDuration,
+} from "../editor/noteGrammar";
+import {
+  OperationLogState,
+  buildScoreReplaceOp,
+  buildScoreTransposeOp,
+} from "../project/OperationLog";
 import { projectPersistence } from "../project/persistence";
 import type {
   NewProjectSpec,
@@ -29,9 +50,12 @@ import type {
 import {
   ApiError,
   api,
+  type Articulation,
   type ChatMessage,
+  type Dynamic,
   type ExtractedScore,
   type KeyEstimate,
+  type TieType,
   type ToolCallRecord,
 } from "./api";
 
@@ -73,6 +97,11 @@ interface ScoreEngineValue {
   canUndo: boolean;
   canRedo: boolean;
 
+  /* --- editor slice (M1.1) ----------------------------------------- */
+  editor: EditorState;
+  editorError: string | null;
+  editorBusy: boolean;
+
   loadFromXml: (filename: string, musicxml: string) => Promise<void>;
   loadFromUrl: (url: string, filename?: string) => Promise<void>;
   play: () => void;
@@ -91,6 +120,21 @@ interface ScoreEngineValue {
   discardPendingRecovery: () => void;
   undo: () => Promise<void>;
   redo: () => Promise<void>;
+
+  /* editor (M1.1) */
+  handleEditorIntent: (intent: EditorIntent) => Promise<void>;
+  insertNoteAtCursor: (
+    pitch: string,
+    duration_quarters: number,
+  ) => Promise<void>;
+  insertRestAtCursor: (duration_quarters: number) => Promise<void>;
+  toggleArticulationOnLast: (articulation: Articulation) => Promise<void>;
+  tieLastNote: () => Promise<void>;
+  setDynamicAtCursor: (dynamic: Dynamic) => Promise<void>;
+  appendMeasure: () => Promise<void>;
+  removeLastNote: () => Promise<void>;
+  moveCursorBy: (delta_beats: number) => void;
+  jumpToNextMeasure: () => void;
 }
 
 const ScoreEngineContext = createContext<ScoreEngineValue | null>(null);
@@ -126,6 +170,11 @@ export function ScoreEngineProvider({ children }: { children: React.ReactNode })
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [opVersion, setOpVersion] = useState(0); // bump to re-derive canUndo/canRedo
+
+  // -- editor slice ---------------------------------------------------
+  const [editor, setEditor] = useState<EditorState>(initialEditorState());
+  const [editorError, setEditorError] = useState<string | null>(null);
+  const [editorBusy, setEditorBusy] = useState(false);
 
   const playerRef = useRef<Player | null>(null);
   const opLogRef = useRef<OperationLogState>(new OperationLogState());
@@ -270,6 +319,8 @@ export function ScoreEngineProvider({ children }: { children: React.ReactNode })
       setLastSavedAt(handle.meta.updated_at);
       setIsDirty(false);
       setSaveError(null);
+      setEditor(initialEditorState());
+      setEditorError(null);
       void refreshRecents();
     },
     [refreshRecents],
@@ -532,6 +583,270 @@ export function ScoreEngineProvider({ children }: { children: React.ReactNode })
     }
   }, [score, project, ingestMusicXml, persistProjectSave]);
 
+  /* ------------------------ editor (M1.1) -------------------------- */
+
+  const applyEditOp = useCallback(
+    async (
+      nextMusicXml: string,
+      description: string,
+    ) => {
+      if (!score) return;
+      const op = buildScoreReplaceOp(
+        {
+          previousMusicXml: score.musicxml,
+          nextMusicXml,
+          reason: description,
+          description,
+        },
+        opLogRef.current.nextIndex,
+      );
+      await applyAndPersistOperation(nextMusicXml, op);
+    },
+    [score, applyAndPersistOperation],
+  );
+
+  const insertNoteAtCursor = useCallback(
+    async (pitch: string, duration_quarters: number) => {
+      if (!score) return;
+      setEditorBusy(true);
+      setEditorError(null);
+      try {
+        const result = await api.insertNote({
+          musicxml: score.musicxml,
+          ...editor.cursor,
+          voice: editor.cursor.voice,
+          pitch,
+          duration_quarters,
+          replace: true,
+        });
+        await applyEditOp(
+          result.musicxml,
+          `Insert ${result.inserted_note.pitch} (${duration_quarters}q)`,
+        );
+        setEditor((s) => {
+          const next = markInserted(s, { ...s.cursor });
+          return {
+            ...next,
+            cursor: result.next_cursor,
+            pending_tie: false,
+          };
+        });
+      } catch (err) {
+        setEditorError(err instanceof ApiError ? err.message : String(err));
+      } finally {
+        setEditorBusy(false);
+      }
+    },
+    [score, editor, applyEditOp],
+  );
+
+  const insertRestAtCursor = useCallback(
+    async (duration_quarters: number) => {
+      if (!score) return;
+      setEditorBusy(true);
+      setEditorError(null);
+      try {
+        const result = await api.insertRest({
+          musicxml: score.musicxml,
+          ...editor.cursor,
+          voice: editor.cursor.voice,
+          duration_quarters,
+        });
+        await applyEditOp(result.musicxml, `Insert rest (${duration_quarters}q)`);
+        setEditor((s) => ({ ...s, cursor: result.next_cursor, pending_tie: false }));
+      } catch (err) {
+        setEditorError(err instanceof ApiError ? err.message : String(err));
+      } finally {
+        setEditorBusy(false);
+      }
+    },
+    [score, editor, applyEditOp],
+  );
+
+  const toggleArticulationOnLast = useCallback(
+    async (articulation: Articulation) => {
+      if (!score) return;
+      const target = editor.last_inserted ?? editor.cursor;
+      setEditorBusy(true);
+      setEditorError(null);
+      try {
+        const result = await api.toggleArticulation({
+          musicxml: score.musicxml,
+          part_index: target.part_index,
+          measure_number: target.measure_number,
+          beat_offset: target.beat_offset,
+          voice: target.voice,
+          articulation,
+        });
+        await applyEditOp(
+          result.musicxml,
+          `${result.action === "added" ? "Add" : "Remove"} ${articulation}`,
+        );
+      } catch (err) {
+        setEditorError(err instanceof ApiError ? err.message : String(err));
+      } finally {
+        setEditorBusy(false);
+      }
+    },
+    [score, editor, applyEditOp],
+  );
+
+  const tieLastNote = useCallback(async () => {
+    if (!score || !editor.last_inserted) return;
+    setEditorBusy(true);
+    setEditorError(null);
+    try {
+      const result = await api.setTie({
+        musicxml: score.musicxml,
+        part_index: editor.last_inserted.part_index,
+        measure_number: editor.last_inserted.measure_number,
+        beat_offset: editor.last_inserted.beat_offset,
+        voice: editor.last_inserted.voice,
+        tie_type: "start" as TieType,
+      });
+      await applyEditOp(result.musicxml, "Tie to next");
+      setEditor((s) => setPendingTie(s));
+    } catch (err) {
+      setEditorError(err instanceof ApiError ? err.message : String(err));
+    } finally {
+      setEditorBusy(false);
+    }
+  }, [score, editor, applyEditOp]);
+
+  const setDynamicAtCursor = useCallback(
+    async (dynamic: Dynamic) => {
+      if (!score) return;
+      setEditorBusy(true);
+      setEditorError(null);
+      try {
+        const result = await api.setDynamic({
+          musicxml: score.musicxml,
+          part_index: editor.cursor.part_index,
+          measure_number: editor.cursor.measure_number,
+          beat_offset: editor.cursor.beat_offset,
+          dynamic,
+        });
+        await applyEditOp(result.musicxml, `Dynamic ${dynamic}`);
+      } catch (err) {
+        setEditorError(err instanceof ApiError ? err.message : String(err));
+      } finally {
+        setEditorBusy(false);
+      }
+    },
+    [score, editor, applyEditOp],
+  );
+
+  const appendMeasureCallback = useCallback(async () => {
+    if (!score) return;
+    setEditorBusy(true);
+    setEditorError(null);
+    try {
+      const result = await api.appendMeasure({
+        musicxml: score.musicxml,
+        part_index: editor.cursor.part_index,
+      });
+      await applyEditOp(result.musicxml, `Append measure ${result.new_measure_number}`);
+    } catch (err) {
+      setEditorError(err instanceof ApiError ? err.message : String(err));
+    } finally {
+      setEditorBusy(false);
+    }
+  }, [score, editor, applyEditOp]);
+
+  const removeLastNote = useCallback(async () => {
+    if (!score || !editor.last_inserted) return;
+    setEditorBusy(true);
+    setEditorError(null);
+    try {
+      const result = await api.removeNote({
+        musicxml: score.musicxml,
+        part_index: editor.last_inserted.part_index,
+        measure_number: editor.last_inserted.measure_number,
+        beat_offset: editor.last_inserted.beat_offset,
+        voice: editor.last_inserted.voice,
+      });
+      await applyEditOp(result.musicxml, "Remove note");
+      setEditor((s) => clearPendingTie({ ...s, last_inserted: null }));
+    } catch (err) {
+      setEditorError(err instanceof ApiError ? err.message : String(err));
+    } finally {
+      setEditorBusy(false);
+    }
+  }, [score, editor, applyEditOp]);
+
+  const moveCursorBy = useCallback((delta_beats: number) => {
+    setEditor((s) => moveCursor(s, delta_beats));
+  }, []);
+
+  const jumpToNextMeasure = useCallback(() => {
+    setEditor((s) => moveCursor(s, 0, { next_measure: true }));
+  }, []);
+
+  const handleEditorIntent = useCallback(
+    async (intent: EditorIntent) => {
+      switch (intent.kind) {
+        case "insert_note": {
+          const pitch = buildSciPitch(intent.letter, intent.accidental, editor.octave);
+          const duration = resolveDuration(editor);
+          await insertNoteAtCursor(pitch, duration);
+          if (editor.pending_tie) await tieLastNote();
+          // advance the next cursor was already done by the backend; nothing else.
+          break;
+        }
+        case "insert_rest": {
+          const duration = resolveDuration(editor);
+          await insertRestAtCursor(duration);
+          break;
+        }
+        case "set_duration":
+          setEditor((s) =>
+            setDuration(s, intent.duration_quarters, { triplet: intent.triplet }),
+          );
+          break;
+        case "toggle_duration_dot":
+          setEditor((s) => toggleDot(s));
+          break;
+        case "octave_up":
+          setEditor((s) => bumpOctave(s, 1));
+          break;
+        case "octave_down":
+          setEditor((s) => bumpOctave(s, -1));
+          break;
+        case "cursor_prev":
+          setEditor((s) => advanceCursor(s, -resolveDuration(s)));
+          break;
+        case "cursor_next":
+          setEditor((s) => advanceCursor(s, resolveDuration(s)));
+          break;
+        case "cursor_next_measure":
+          jumpToNextMeasure();
+          break;
+        case "remove_last":
+          await removeLastNote();
+          break;
+        case "tie_to_next":
+          await tieLastNote();
+          break;
+        case "toggle_articulation":
+          await toggleArticulationOnLast(intent.articulation);
+          break;
+        case "set_dynamic":
+          await setDynamicAtCursor(intent.dynamic);
+          break;
+      }
+    },
+    [
+      editor,
+      insertNoteAtCursor,
+      insertRestAtCursor,
+      jumpToNextMeasure,
+      removeLastNote,
+      setDynamicAtCursor,
+      tieLastNote,
+      toggleArticulationOnLast,
+    ],
+  );
+
   /* ------------------------ chat ------------------------------------ */
 
   const sendChat = useCallback(
@@ -627,6 +942,9 @@ export function ScoreEngineProvider({ children }: { children: React.ReactNode })
       saveError,
       canUndo,
       canRedo,
+      editor,
+      editorError,
+      editorBusy,
       loadFromXml,
       loadFromUrl,
       play,
@@ -644,6 +962,16 @@ export function ScoreEngineProvider({ children }: { children: React.ReactNode })
       discardPendingRecovery,
       undo,
       redo,
+      handleEditorIntent,
+      insertNoteAtCursor,
+      insertRestAtCursor,
+      toggleArticulationOnLast,
+      tieLastNote,
+      setDynamicAtCursor,
+      appendMeasure: appendMeasureCallback,
+      removeLastNote,
+      moveCursorBy,
+      jumpToNextMeasure,
     }),
     [
       score,
@@ -664,6 +992,9 @@ export function ScoreEngineProvider({ children }: { children: React.ReactNode })
       saveError,
       canUndo,
       canRedo,
+      editor,
+      editorError,
+      editorBusy,
       loadFromXml,
       loadFromUrl,
       play,
@@ -681,6 +1012,16 @@ export function ScoreEngineProvider({ children }: { children: React.ReactNode })
       discardPendingRecovery,
       undo,
       redo,
+      handleEditorIntent,
+      insertNoteAtCursor,
+      insertRestAtCursor,
+      toggleArticulationOnLast,
+      tieLastNote,
+      setDynamicAtCursor,
+      appendMeasureCallback,
+      removeLastNote,
+      moveCursorBy,
+      jumpToNextMeasure,
     ],
   );
 

@@ -51,6 +51,44 @@ export interface ChatResult {
   tool_calls: ToolCallRecord[];
 }
 
+/* ------------------------ score edit (M1.1) ------------------------- */
+
+export interface EditCursor {
+  part_index: number;
+  measure_number: number;
+  beat_offset: number;
+  voice: number | null;
+}
+
+export interface InsertNoteResult {
+  musicxml: string;
+  next_cursor: EditCursor;
+  inserted_note: {
+    pitch: string;
+    midi: number;
+    duration_quarters: number;
+  };
+}
+
+export interface InsertRestResult {
+  musicxml: string;
+  next_cursor: EditCursor;
+}
+
+export interface ToggleResult {
+  musicxml: string;
+  action: "added" | "removed";
+}
+
+export interface AppendMeasureResult {
+  musicxml: string;
+  new_measure_number: number;
+}
+
+export type Articulation = "staccato" | "accent" | "marcato" | "tenuto" | "fermata";
+export type Dynamic = "ppp" | "pp" | "p" | "mp" | "mf" | "f" | "ff" | "fff";
+export type TieType = "start" | "stop" | "continue" | "none";
+
 class ApiError extends Error {
   constructor(
     message: string,
@@ -103,6 +141,63 @@ export const api = {
       messages,
       score_musicxml: scoreMusicXml,
     }),
+
+  insertNote: (req: {
+    musicxml: string;
+    part_index: number;
+    measure_number: number;
+    beat_offset: number;
+    pitch: string;
+    duration_quarters: number;
+    voice?: number | null;
+    replace?: boolean;
+  }) => post<InsertNoteResult>("/score/edit/note/insert", req),
+
+  insertRest: (req: {
+    musicxml: string;
+    part_index: number;
+    measure_number: number;
+    beat_offset: number;
+    duration_quarters: number;
+    voice?: number | null;
+  }) => post<InsertRestResult>("/score/edit/note/rest", req),
+
+  removeNote: (req: {
+    musicxml: string;
+    part_index: number;
+    measure_number: number;
+    beat_offset: number;
+    voice?: number | null;
+  }) => post<{ musicxml: string }>("/score/edit/note/remove", req),
+
+  toggleArticulation: (req: {
+    musicxml: string;
+    part_index: number;
+    measure_number: number;
+    beat_offset: number;
+    articulation: Articulation;
+    voice?: number | null;
+  }) => post<ToggleResult>("/score/edit/articulation/toggle", req),
+
+  setTie: (req: {
+    musicxml: string;
+    part_index: number;
+    measure_number: number;
+    beat_offset: number;
+    tie_type: TieType;
+    voice?: number | null;
+  }) => post<{ musicxml: string }>("/score/edit/tie/set", req),
+
+  setDynamic: (req: {
+    musicxml: string;
+    part_index: number;
+    measure_number: number;
+    beat_offset: number;
+    dynamic: Dynamic;
+  }) => post<{ musicxml: string }>("/score/edit/dynamic/set", req),
+
+  appendMeasure: (req: { musicxml: string; part_index: number }) =>
+    post<AppendMeasureResult>("/score/edit/measure/append", req),
 };
 
 export { ApiError };
