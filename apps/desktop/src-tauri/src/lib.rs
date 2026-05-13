@@ -8,6 +8,7 @@ use tracing::info;
 
 mod audio;
 mod commands;
+mod persistence;
 
 use audio::AudioMeter;
 
@@ -23,7 +24,7 @@ fn app_info() -> AppInfo {
     AppInfo {
         name: "Stockhausen",
         version: env!("CARGO_PKG_VERSION"),
-        phase: "0",
+        phase: "1",
     }
 }
 
@@ -49,6 +50,14 @@ pub fn run() {
             commands::start_input_meter,
             commands::stop_input_meter,
             commands::input_meter_status,
+            persistence::project_new,
+            persistence::project_open,
+            persistence::project_open_dialog,
+            persistence::project_save,
+            persistence::project_close,
+            persistence::project_recent_list,
+            persistence::project_recent_forget,
+            persistence::project_default_root,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

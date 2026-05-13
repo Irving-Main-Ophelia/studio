@@ -30,6 +30,14 @@ cpal = "0.15"
 midir = "0.10"
 ringbuf = "0.4"
 
+# Persistence + project model (M1.0)
+chrono = { version = "0.4", features = ["serde"] }
+dirs = "5"
+uuid = { version = "1", features = ["v4", "serde"] }
+
+[dev-dependencies]
+tempfile = "3"
+
 [profile.dev]
 incremental = true
 
