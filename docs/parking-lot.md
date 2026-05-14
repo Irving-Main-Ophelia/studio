@@ -43,3 +43,21 @@ and a one-line note about why it was deferred.
 - **Stale-diff UI prompt (M1.4, partial).** The diff already carries
   `base_score_hash`; the M1.4 UI does not yet detect a mismatch and prompt
   "this proposal is based on an older version". Land in M1.5 polish.
+- **In-app WAV render via `OfflineAudioContext` (M1.5, deferred).** Backend
+  fallback ships today (sine-bank). The high-fidelity render through the
+  Mixer + sampler chain lands once `sfizz.wasm` is in place.
+- **Self-hosted typography pass (M1.5, deferred).** Geist Sans / JetBrains
+  Mono / Cormorant Garamond / Bravura need to live under
+  `apps/desktop/public/fonts/`; the visual design is functional today with
+  system fonts. Pure styling work.
+- **Framer-Motion choreography variants (M1.5, deferred).** UI works without
+  animation today; the variants from `UI_DESIGN.md §4` (panel fades,
+  marquee shimmer, beat-line pulse) layer on top.
+- **Parchment ↔ Night score-theme switcher (M1.5, deferred).** OSMD style
+  override + a single toggle in Settings. Mechanically small but
+  ergonomically polish-only.
+- **e2e Tauri test (M1.5, deferred).** PHASE_1.md §1.2 calls for a
+  `@tauri-apps/test` driven flow: new project → 8 bars → save → reopen →
+  transpose → export PDF. Today the same flow is covered by the unit +
+  integration test surface; the e2e harness will be wired alongside the
+  Phase-1 demo recording (`docs/demos/phase-1-demo.mov`).

@@ -2,11 +2,14 @@ import { useState } from "react";
 
 import { DiffOverlay } from "../agent/DiffOverlay";
 import { useEditorKeyboard } from "../editor/useEditorKeyboard";
+import { ExportDialog } from "../export/ExportDialog";
+import { TransposeDialog } from "../editor/TransposeDialog";
 import { useScoreEngine } from "../lib/ScoreEngine";
 import { useKeyboardShortcuts } from "../lib/useKeyboardShortcuts";
 import { NewProjectDialog } from "../project/NewProjectDialog";
 import { RecoveryBanner } from "../project/RecoveryBanner";
 import { BottomRail } from "./BottomRail";
+import { CommandPalette } from "./CommandPalette";
 import { ProjectTree } from "./ProjectTree";
 import { RightRail } from "./RightRail";
 import { ScorePane } from "./ScorePane";
@@ -34,9 +37,10 @@ interface AppInfo {
 export function Shell({ info }: { info: AppInfo }) {
   const engine = useScoreEngine();
   const [newDialog, setNewDialog] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
+  const [transposeOpen, setTransposeOpen] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
 
-  // Editor keyboard listener: only active when a project is open and no
-  // ⌘-bound shortcut is firing.
   useEditorKeyboard(Boolean(engine.project));
 
   useKeyboardShortcuts([
@@ -64,6 +68,8 @@ export function Shell({ info }: { info: AppInfo }) {
         if (engine.canRedo) void engine.redo();
       },
     },
+    { key: "k", meta: true, handler: () => setPaletteOpen((v) => !v) },
+    { key: "e", meta: true, shift: true, handler: () => setExportOpen(true) },
   ]);
 
   return (
@@ -80,6 +86,23 @@ export function Shell({ info }: { info: AppInfo }) {
         <RightRail />
       </div>
       <DiffOverlay />
+      <ExportDialog open={exportOpen} onClose={() => setExportOpen(false)} />
+      <TransposeDialog open={transposeOpen} onClose={() => setTransposeOpen(false)} />
+      <CommandPalette
+        open={paletteOpen}
+        onClose={() => setPaletteOpen(false)}
+        onOpenNewProject={() => setNewDialog(true)}
+        onOpenExport={() => setExportOpen(true)}
+        onOpenTranspose={() => setTransposeOpen(true)}
+        onFocusTutor={() => {
+          // Tutor tab lives inside RightRail; opening the palette command
+          // simply scrolls focus to the right rail. Wiring an event bus
+          // for "focus tab=tutor" is a Phase-2 nicety; today the rail
+          // already shows the tab next to Agent.
+          const aside = document.querySelector("aside[aria-label='Theory Tutor']");
+          if (aside instanceof HTMLElement) aside.focus();
+        }}
+      />
     </div>
   );
 }
