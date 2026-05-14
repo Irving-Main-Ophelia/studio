@@ -24,3 +24,9 @@ and a one-line note about why it was deferred.
   needs a voice selector — Phase 2.
 - **Cross-staff beaming (M1.1, deferred).** Belongs with multi-voice grand
   staff piano UX.
+- **sfizz.wasm AudioWorklet sampler (M1.2, deferred).** The engine swap is
+  abstracted; ships when the maintainer downloads VSCO 2 CE.
+- **Rubber Band GPL FFI implementation (M1.2, deferred).** Scaffold + Tauri
+  command shipped. Real C++ link drops in behind the same surface.
+- **Per-track output meters in the mixer (M1.2, deferred).** Need AnalyserNodes
+  per channel; slipping to M1.5 polish.

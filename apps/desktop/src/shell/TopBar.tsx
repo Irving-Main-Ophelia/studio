@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Loader2, Pause, Play, Repeat, Settings, Square } from "lucide-react";
+import { Loader2, MapPin, Pause, Play, Repeat, Settings, Square } from "lucide-react";
 
 import { useScoreEngine } from "../lib/ScoreEngine";
 import { NorthStar } from "./NorthStar";
@@ -81,7 +81,28 @@ export function TopBar({ info }: { info: AppInfo }) {
           onClick={() => engine.stop()}
           icon={<Square size={14} />}
         />
-        <TransportButton label="Loop (Phase 1)" disabled icon={<Repeat size={14} />} />
+        <TransportButton
+          label="Play from cursor"
+          disabled={!canPlay || !engine.project}
+          onClick={() => void engine.playFromCursor()}
+          icon={<MapPin size={14} />}
+        />
+        <TransportButton
+          label={engine.loop ? "Clear loop" : "Loop last 4 bars"}
+          disabled={!canPlay}
+          highlighted={!!engine.loop}
+          onClick={() => {
+            if (!engine.score) return;
+            if (engine.loop) {
+              engine.setLoop(null);
+            } else {
+              const total = engine.score.extracted.duration_sec;
+              const start = Math.max(0, total - 8);
+              engine.setLoop({ start_sec: start, end_sec: total });
+            }
+          }}
+          icon={<Repeat size={14} />}
+        />
 
         {/* Position / tempo readout */}
         <div className="ml-3 num text-xs text-zinc-400">
@@ -145,11 +166,13 @@ function TransportButton({
   icon,
   onClick,
   disabled,
+  highlighted,
 }: {
   label: string;
   icon: React.ReactNode;
   onClick?: () => void;
   disabled?: boolean;
+  highlighted?: boolean;
 }) {
   return (
     <button
@@ -157,7 +180,13 @@ function TransportButton({
       title={label}
       onClick={onClick}
       disabled={disabled}
-      className="flex h-7 w-7 items-center justify-center rounded-md text-zinc-400 transition-colors duration-150 ease-signature hover:bg-obsidian-700 hover:text-zinc-100 disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-zinc-400"
+      className={[
+        "flex h-7 w-7 items-center justify-center rounded-md transition-colors duration-150 ease-signature",
+        highlighted
+          ? "bg-neon-amber/15 text-neon-amber"
+          : "text-zinc-400 hover:bg-obsidian-700 hover:text-zinc-100",
+        "disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-zinc-400",
+      ].join(" ")}
     >
       {icon}
     </button>

@@ -9,6 +9,7 @@ use tracing::info;
 mod audio;
 mod commands;
 mod persistence;
+mod rubberband;
 
 use audio::AudioMeter;
 
@@ -58,6 +59,7 @@ pub fn run() {
             persistence::project_recent_list,
             persistence::project_recent_forget,
             persistence::project_default_root,
+            rubberband::rubberband_stretch,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

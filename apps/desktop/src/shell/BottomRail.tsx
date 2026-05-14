@@ -2,15 +2,18 @@ import { Mic, MicOff, Music3 } from "lucide-react";
 
 import { useAudioMeter } from "../lib/useAudioMeter";
 import { useMidi } from "../lib/useMidi";
+import { MixerPane } from "./MixerPane";
 
 /**
- * Bottom rail — Phase 0:
+ * Bottom rail — Phase 1:
+ *   - Mixer rail (per-track gain/pan/mute/solo + master + click + count-in).
  *   - Audio input meter (CPAL → Rust → Tauri event).
  *   - Web MIDI device list + recent events log.
  */
 export function BottomRail() {
   return (
-    <footer className="grid h-32 shrink-0 grid-cols-2 gap-3 border-t border-obsidian-700 bg-obsidian-800/60 px-3 py-2 text-xs text-zinc-300">
+    <footer className="grid h-36 shrink-0 grid-cols-[2fr_1fr_1fr] gap-3 border-t border-obsidian-700 bg-obsidian-800/60 px-3 py-2 text-xs text-zinc-300">
+      <MixerPane />
       <AudioMeterTile />
       <MidiTile />
     </footer>

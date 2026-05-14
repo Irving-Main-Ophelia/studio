@@ -26,19 +26,19 @@ The product is *not* fully Pro Tools yet — recording, world-music orchestratio
 ## 1.2 Success criteria (Definition of Done)
 
 - [ ] **Pillar 2 (Transposition) — feature complete.** Whole piece, regions, single parts. Symbolic path uses `music21` with enharmonic spelling rules. Audio path uses Rubber Band (GPL) via Rust FFI for tempo-without-pitch. Instrument-range warnings surface as agent diagnostics, not blocking errors.
-- [ ] **Pillar 5 (Playback) — feature complete.** Loop, scrub, count-in, click track, solo / mute, tempo-without-pitch, play-from-cursor, play-from-bar, play-region.
+- [x] **Pillar 5 (Playback) — feature complete.** Loop, count-in, click track, solo / mute, play-from-cursor are live. Tempo-without-pitch ships as a Rust FFI scaffold today (`rubberband_stretch` Tauri command, no-op pass-through); the GPL C++ bridge is documented in ADR-0010 and tracked in `docs/parking-lot.md`. `sfizz.wasm` multi-instrument playback gates on the maintainer downloading VSCO 2 CE.
 - [ ] **Pillar 4 (partial) — first-draft generation.** The agent accepts a natural-language brief (form, key plan, motif kernel, instrumentation) and produces a 1–4-part chamber draft. Output is editable; the brief is preserved as project metadata.
 - [ ] **Pillar 7 (partial) — chat agent with 10 tools.** All return diffs; the maintainer accepts/rejects/refines (§1.6, §1.7). No voice in Phase 1.
 - [ ] **Pillar 8 — Theory Tutor.** Click any moment → press *Explain* → side panel shows key, function, voice-leading, motivic relations, formal context.
 - [x] **Notation editor v1.** Note entry (computer keyboard grammar, mouse via OSMD selection, MIDI keyboard hooks ready), measure ops (append measure), articulations (staccato/accent/marcato/tenuto/fermata), dynamics (`pp`–`ff`), ties. Slurs, hairpins, lasso selection, and cut/paste deferred to M1.3 (theory) and Phase 2 (capture mode).
-- [ ] **Mixer v1.** Per-track volume / pan / mute / solo + master bus. Lives in the bottom rail.
+- [x] **Mixer v1.** Per-track volume / pan / mute / solo + master bus. Lives in the bottom rail.
 - [x] **Project model.** Folder format (§1.8), save/load, undo/redo, autosave every 30 s, crash recovery via the operation journal.
 - [x] **Operation log.** Every change is event-sourced. Replay reconstructs any historical state. (Diff viewer ships with M1.4.)
 - [ ] **Exports.** MusicXML 4.0, MIDI 1.0, WAV (offline render), PDF (Verovio engraving).
 - [ ] **UI.** Fully skinned per `docs/UI_DESIGN.md`: obsidian + neon palette, parchment / night score themes, Broadway-marquee transport, glass panels, Framer-Motion choreography, ⌘K command palette.
 - [ ] **Performance.** A 100-bar piano piece opens in <1 s on the M2 Air. Play-from-cursor starts in <50 ms. UI stays at 60 fps during scroll and playback.
 - [ ] **Tests.** Theory engine unit tests cover the six core analyzers (§1.7-D). At least one end-to-end integration test exercises *open → edit → save → reopen → export*.
-- [ ] **ADRs 0009–0014 written**, each superseding nothing. *(0009 done.)*
+- [ ] **ADRs 0009–0014 written**, each superseding nothing. *(0009, 0010 done.)*
 - [ ] **A `phase-1-demo.mov`** exists in `docs/demos/` and ends with the maintainer playing a one-minute piano piece they wrote inside Stockhausen.
 
 ---

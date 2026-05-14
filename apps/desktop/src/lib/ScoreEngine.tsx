@@ -17,7 +17,8 @@ import {
   useState,
 } from "react";
 
-import { Player, type PlayerStatus } from "../audio/Player";
+import type { MixerSnapshot } from "../audio/Mixer";
+import { Player, type LoopRegion, type PlayerStatus } from "../audio/Player";
 import type { EditorState } from "../editor/EditorState";
 import {
   advanceCursor,
@@ -102,6 +103,12 @@ interface ScoreEngineValue {
   editorError: string | null;
   editorBusy: boolean;
 
+  /* --- transport / mixer slice (M1.2) ------------------------------ */
+  mixer: MixerSnapshot;
+  loop: LoopRegion | null;
+  clickEnabled: boolean;
+  countInBars: number;
+
   loadFromXml: (filename: string, musicxml: string) => Promise<void>;
   loadFromUrl: (url: string, filename?: string) => Promise<void>;
   play: () => void;
@@ -135,6 +142,18 @@ interface ScoreEngineValue {
   removeLastNote: () => Promise<void>;
   moveCursorBy: (delta_beats: number) => void;
   jumpToNextMeasure: () => void;
+
+  /* transport / mixer (M1.2) */
+  setTrackGain: (id: string, gain_db: number) => void;
+  setTrackPan: (id: string, pan: number) => void;
+  setTrackMute: (id: string, mute: boolean) => void;
+  setTrackSolo: (id: string, solo: boolean) => void;
+  setMasterGain: (gain_db: number) => void;
+  setLoop: (region: LoopRegion | null) => void;
+  setClick: (enabled: boolean) => void;
+  setCountIn: (bars: number) => void;
+  playFrom: (seconds: number) => Promise<void>;
+  playFromCursor: () => Promise<void>;
 }
 
 const ScoreEngineContext = createContext<ScoreEngineValue | null>(null);
@@ -175,6 +194,17 @@ export function ScoreEngineProvider({ children }: { children: React.ReactNode })
   const [editor, setEditor] = useState<EditorState>(initialEditorState());
   const [editorError, setEditorError] = useState<string | null>(null);
   const [editorBusy, setEditorBusy] = useState(false);
+
+  // -- transport / mixer slice ---------------------------------------
+  const [mixer, setMixer] = useState<MixerSnapshot>({
+    master: { gain_db: 0 },
+    tracks: [
+      { id: "piano", gain_db: 0, pan: 0, mute: false, solo: false },
+    ],
+  });
+  const [loop, setLoopState] = useState<LoopRegion | null>(null);
+  const [clickEnabled, setClickEnabledState] = useState(false);
+  const [countInBars, setCountInBarsState] = useState(0);
 
   const playerRef = useRef<Player | null>(null);
   const opLogRef = useRef<OperationLogState>(new OperationLogState());
@@ -425,13 +455,123 @@ export function ScoreEngineProvider({ children }: { children: React.ReactNode })
     const s = score;
     const player = playerRef.current;
     if (!s || !player) return;
+    player.setTempo(s.extracted.tempo_bpm);
+    player.setCountIn(countInBars);
+    player.setClick(clickEnabled);
+    player.setLoop(loop);
+    player.setMixerSnapshot(mixer);
     void player.play(s.extracted.notes, s.extracted.duration_sec);
-  }, [score]);
+  }, [score, countInBars, clickEnabled, loop, mixer]);
 
   const stop = useCallback(() => {
     playerRef.current?.stop();
     setPositionSec(0);
   }, []);
+
+  const playFrom = useCallback(
+    async (seconds: number) => {
+      const s = score;
+      const player = playerRef.current;
+      if (!s || !player) return;
+      player.setTempo(s.extracted.tempo_bpm);
+      player.setCountIn(countInBars);
+      player.setClick(clickEnabled);
+      player.setLoop(loop);
+      player.setMixerSnapshot(mixer);
+      await player.play(s.extracted.notes, s.extracted.duration_sec, seconds);
+    },
+    [score, countInBars, clickEnabled, loop, mixer],
+  );
+
+  const playFromCursor = useCallback(async () => {
+    const s = score;
+    if (!s) return;
+    // Convert editor cursor (measure + beat) to seconds via the score's
+    // tempo. M1.3 will replace this with music21-aware mapping per measure.
+    const beatsPerBar = 4;
+    const beatSec = 60 / Math.max(s.extracted.tempo_bpm, 1);
+    const seconds =
+      (editor.cursor.measure_number - 1) * beatsPerBar * beatSec +
+      editor.cursor.beat_offset * beatSec;
+    await playFrom(seconds);
+  }, [score, editor.cursor, playFrom]);
+
+  /* ------------------ Mixer mutators ------------------------------- */
+
+  const updateMixer = useCallback((updater: (prev: MixerSnapshot) => MixerSnapshot) => {
+    setMixer((prev) => {
+      const next = updater(prev);
+      playerRef.current?.setMixerSnapshot(next);
+      return next;
+    });
+  }, []);
+
+  const setTrackGain = useCallback(
+    (id: string, gain_db: number) => {
+      updateMixer((prev) => ({
+        ...prev,
+        tracks: prev.tracks.map((t) => (t.id === id ? { ...t, gain_db } : t)),
+      }));
+    },
+    [updateMixer],
+  );
+
+  const setTrackPan = useCallback(
+    (id: string, pan: number) => {
+      updateMixer((prev) => ({
+        ...prev,
+        tracks: prev.tracks.map((t) => (t.id === id ? { ...t, pan } : t)),
+      }));
+    },
+    [updateMixer],
+  );
+
+  const setTrackMute = useCallback(
+    (id: string, mute: boolean) => {
+      updateMixer((prev) => ({
+        ...prev,
+        tracks: prev.tracks.map((t) => (t.id === id ? { ...t, mute } : t)),
+      }));
+    },
+    [updateMixer],
+  );
+
+  const setTrackSolo = useCallback(
+    (id: string, solo: boolean) => {
+      updateMixer((prev) => ({
+        ...prev,
+        tracks: prev.tracks.map((t) => (t.id === id ? { ...t, solo } : t)),
+      }));
+    },
+    [updateMixer],
+  );
+
+  const setMasterGain = useCallback(
+    (gain_db: number) => {
+      updateMixer((prev) => ({ ...prev, master: { gain_db } }));
+    },
+    [updateMixer],
+  );
+
+  const setLoop = useCallback((region: LoopRegion | null) => {
+    setLoopState(region);
+    playerRef.current?.setLoop(region);
+  }, []);
+
+  const setClick = useCallback((enabled: boolean) => {
+    setClickEnabledState(enabled);
+    playerRef.current?.setClick(enabled);
+  }, []);
+
+  const setCountIn = useCallback((bars: number) => {
+    setCountInBarsState(bars);
+    playerRef.current?.setCountIn(bars);
+  }, []);
+
+  // Keep the live engine in sync with mixer / loop changes.
+  useEffect(() => {
+    playerRef.current?.setMixerSnapshot(mixer);
+  }, [mixer]);
 
   /* ------------------------ operations ------------------------------ */
 
@@ -945,6 +1085,10 @@ export function ScoreEngineProvider({ children }: { children: React.ReactNode })
       editor,
       editorError,
       editorBusy,
+      mixer,
+      loop,
+      clickEnabled,
+      countInBars,
       loadFromXml,
       loadFromUrl,
       play,
@@ -972,6 +1116,16 @@ export function ScoreEngineProvider({ children }: { children: React.ReactNode })
       removeLastNote,
       moveCursorBy,
       jumpToNextMeasure,
+      setTrackGain,
+      setTrackPan,
+      setTrackMute,
+      setTrackSolo,
+      setMasterGain,
+      setLoop,
+      setClick,
+      setCountIn,
+      playFrom,
+      playFromCursor,
     }),
     [
       score,
@@ -1022,6 +1176,20 @@ export function ScoreEngineProvider({ children }: { children: React.ReactNode })
       removeLastNote,
       moveCursorBy,
       jumpToNextMeasure,
+      mixer,
+      loop,
+      clickEnabled,
+      countInBars,
+      setTrackGain,
+      setTrackPan,
+      setTrackMute,
+      setTrackSolo,
+      setMasterGain,
+      setLoop,
+      setClick,
+      setCountIn,
+      playFrom,
+      playFromCursor,
     ],
   );
 
