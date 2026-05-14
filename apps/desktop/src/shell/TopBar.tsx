@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { Loader2, MapPin, Pause, Play, Repeat, Settings, Square } from "lucide-react";
 
+import { TransposeDialog } from "../editor/TransposeDialog";
 import { useScoreEngine } from "../lib/ScoreEngine";
 import { NorthStar } from "./NorthStar";
 
@@ -35,6 +36,7 @@ const PRESET_KEYS = [
 export function TopBar({ info }: { info: AppInfo }) {
   const engine = useScoreEngine();
   const [showTranspose, setShowTranspose] = useState(false);
+  const [showAdvancedTranspose, setShowAdvancedTranspose] = useState(false);
 
   const isPlaying = engine.playerStatus === "playing";
   const isLoading = engine.playerStatus === "loading" || engine.loading;
@@ -145,9 +147,19 @@ export function TopBar({ info }: { info: AppInfo }) {
             setShowTranspose(false);
             await engine.transpose(k);
           }}
+          onOpenAdvanced={() => {
+            setShowTranspose(false);
+            setShowAdvancedTranspose(true);
+          }}
           onClose={() => setShowTranspose(false)}
         />
       )}
+
+      {/* Region-aware transpose modal (M1.3) */}
+      <TransposeDialog
+        open={showAdvancedTranspose}
+        onClose={() => setShowAdvancedTranspose(false)}
+      />
 
       {/* Marquee shimmer — animates when playing */}
       <span
@@ -195,9 +207,11 @@ function TransportButton({
 
 function TransposePanel({
   onChoose,
+  onOpenAdvanced,
   onClose,
 }: {
   onChoose: (k: string) => void | Promise<void>;
+  onOpenAdvanced: () => void;
   onClose: () => void;
 }) {
   return (
@@ -223,8 +237,17 @@ function TransposePanel({
           </button>
         ))}
       </div>
+      <button
+        onClick={onOpenAdvanced}
+        className="mt-2 w-full rounded px-2 py-1 text-[11px] text-neon-cyan transition-colors hover:bg-neon-violet/20"
+      >
+        Region-aware transpose…
+      </button>
       <p className="mt-2 text-[10px] text-zinc-500">
-        Or ask the agent: <span className="text-neon-cyan">“transpose to F minor”</span>
+        Or ask the agent:{" "}
+        <span className="text-neon-cyan">
+          &ldquo;transpose bars 9–16 up a third&rdquo;
+        </span>
       </p>
     </div>
   );

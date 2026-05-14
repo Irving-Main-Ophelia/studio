@@ -17,6 +17,9 @@ importers:
       '@radix-ui/react-slot':
         specifier: ^1.1.1
         version: 1.2.4(@types/react@19.2.14)(react@19.2.6)
+      '@stockhausen/theory-types':
+        specifier: workspace:*
+        version: link:../../packages/theory/ts
       '@tauri-apps/api':
         specifier: ^2.1.1
         version: 2.11.0
@@ -126,6 +129,8 @@ importers:
       vitest:
         specifier: ^2.1.9
         version: 2.1.9(@types/node@22.19.19)(jsdom@25.0.1)
+
+  packages/theory/ts: {}
 
 packages:
 

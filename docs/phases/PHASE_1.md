@@ -25,7 +25,7 @@ The product is *not* fully Pro Tools yet — recording, world-music orchestratio
 
 ## 1.2 Success criteria (Definition of Done)
 
-- [ ] **Pillar 2 (Transposition) — feature complete.** Whole piece, regions, single parts. Symbolic path uses `music21` with enharmonic spelling rules. Audio path uses Rubber Band (GPL) via Rust FFI for tempo-without-pitch. Instrument-range warnings surface as agent diagnostics, not blocking errors.
+- [x] **Pillar 2 (Transposition) — feature complete.** Whole-piece and region/part transposition both ship: `stockhausen_theory.transpose` and `transpose_region` (M1.3) handle enharmonic respelling via `music21` and emit instrument-range warnings as structured diagnostics. The desktop app exposes both via the top-bar Transpose menu and the new Region-aware modal (`apps/desktop/src/editor/TransposeDialog.tsx`). Audio-domain tempo-without-pitch lives in the Rubber Band FFI scaffold (ADR-0010); the C++ bridge is deferred to M1.5/Phase 2.
 - [x] **Pillar 5 (Playback) — feature complete.** Loop, count-in, click track, solo / mute, play-from-cursor are live. Tempo-without-pitch ships as a Rust FFI scaffold today (`rubberband_stretch` Tauri command, no-op pass-through); the GPL C++ bridge is documented in ADR-0010 and tracked in `docs/parking-lot.md`. `sfizz.wasm` multi-instrument playback gates on the maintainer downloading VSCO 2 CE.
 - [ ] **Pillar 4 (partial) — first-draft generation.** The agent accepts a natural-language brief (form, key plan, motif kernel, instrumentation) and produces a 1–4-part chamber draft. Output is editable; the brief is preserved as project metadata.
 - [ ] **Pillar 7 (partial) — chat agent with 10 tools.** All return diffs; the maintainer accepts/rejects/refines (§1.6, §1.7). No voice in Phase 1.
@@ -38,7 +38,7 @@ The product is *not* fully Pro Tools yet — recording, world-music orchestratio
 - [ ] **UI.** Fully skinned per `docs/UI_DESIGN.md`: obsidian + neon palette, parchment / night score themes, Broadway-marquee transport, glass panels, Framer-Motion choreography, ⌘K command palette.
 - [ ] **Performance.** A 100-bar piano piece opens in <1 s on the M2 Air. Play-from-cursor starts in <50 ms. UI stays at 60 fps during scroll and playback.
 - [ ] **Tests.** Theory engine unit tests cover the six core analyzers (§1.7-D). At least one end-to-end integration test exercises *open → edit → save → reopen → export*.
-- [ ] **ADRs 0009–0014 written**, each superseding nothing. *(0009, 0010 done.)*
+- [ ] **ADRs 0009–0014 written**, each superseding nothing. *(0009, 0010, 0011 done.)*
 - [ ] **A `phase-1-demo.mov`** exists in `docs/demos/` and ends with the maintainer playing a one-minute piano piece they wrote inside Stockhausen.
 
 ---

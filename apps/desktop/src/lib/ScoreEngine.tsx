@@ -114,6 +114,10 @@ interface ScoreEngineValue {
   play: () => void;
   stop: () => void;
   transpose: (target_key: string) => Promise<void>;
+  transposeRegion: (
+    target: { target_key?: string; interval_name?: string },
+    range: { measure_start: number; measure_end: number; part_indices?: number[] },
+  ) => Promise<{ warnings: number } | null>;
   sendChat: (text: string) => Promise<void>;
   resetChat: () => void;
 
@@ -623,6 +627,46 @@ export function ScoreEngineProvider({ children }: { children: React.ReactNode })
     [score, applyAndPersistOperation],
   );
 
+  const transposeRegion = useCallback(
+    async (
+      target: { target_key?: string; interval_name?: string },
+      range: { measure_start: number; measure_end: number; part_indices?: number[] },
+    ) => {
+      if (!score) return null;
+      setLoading(true);
+      setLoadError(null);
+      try {
+        const result = await api.transposeRegion({
+          musicxml: score.musicxml,
+          target_key: target.target_key,
+          interval_name: target.interval_name,
+          measure_start: range.measure_start,
+          measure_end: range.measure_end,
+          part_indices: range.part_indices,
+        });
+        const op = buildScoreTransposeOp(
+          {
+            previousMusicXml: score.musicxml,
+            nextMusicXml: result.musicxml,
+            fromKey: result.source_key,
+            toKey: result.target_key,
+            interval: result.interval,
+          },
+          opLogRef.current.nextIndex,
+        );
+        await applyAndPersistOperation(result.musicxml, op);
+        return { warnings: result.warnings.length };
+      } catch (err) {
+        const msg = err instanceof ApiError ? err.message : String(err);
+        setLoadError(msg);
+        return null;
+      } finally {
+        setLoading(false);
+      }
+    },
+    [score, applyAndPersistOperation],
+  );
+
   /* ------------------------ recovery -------------------------------- */
 
   const acceptPendingRecovery = useCallback(async () => {
@@ -1094,6 +1138,7 @@ export function ScoreEngineProvider({ children }: { children: React.ReactNode })
       play,
       stop,
       transpose,
+      transposeRegion,
       sendChat,
       resetChat,
       refreshRecents,
@@ -1154,6 +1199,7 @@ export function ScoreEngineProvider({ children }: { children: React.ReactNode })
       play,
       stop,
       transpose,
+      transposeRegion,
       sendChat,
       resetChat,
       refreshRecents,

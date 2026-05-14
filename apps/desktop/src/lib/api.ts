@@ -5,6 +5,19 @@
  * the error to the caller so the UI can show a banner.
  */
 
+import type {
+  CadenceAnalysis,
+  MotifAnalysis,
+  ProgressionAnalysis,
+  RangeAnalysis,
+  RhythmValidation,
+  TransposeRegionRequest,
+  TransposeResult as TransposeRegionResult,
+  VoiceLeadingAnalysis,
+  VoiceLeadingValidation,
+  VoicingValidation,
+} from "@stockhausen/theory-types";
+
 export const BACKEND_URL = "http://127.0.0.1:8000";
 
 export interface KeyEstimate {
@@ -198,6 +211,33 @@ export const api = {
 
   appendMeasure: (req: { musicxml: string; part_index: number }) =>
     post<AppendMeasureResult>("/score/edit/measure/append", req),
+
+  /* --------------------- theory analyzers (M1.3) --------------------- */
+  progression: (musicxml: string) =>
+    post<ProgressionAnalysis>("/theory/progression", { musicxml }),
+  voiceLeading: (musicxml: string) =>
+    post<VoiceLeadingAnalysis>("/theory/voice-leading", { musicxml }),
+  range: (musicxml: string) => post<RangeAnalysis>("/theory/range", { musicxml }),
+  cadences: (musicxml: string) => post<CadenceAnalysis>("/theory/cadences", { musicxml }),
+  motifs: (musicxml: string, n = 4, min_occurrences = 2) =>
+    post<MotifAnalysis>("/theory/motifs", { musicxml, n, min_occurrences }),
+
+  /* --------------------- theory validators (M1.3) -------------------- */
+  validateVoiceLeading: (musicxml: string) =>
+    post<VoiceLeadingValidation>("/theory/validate/voice-leading", { musicxml }),
+  validateRange: (musicxml: string) =>
+    post<{ warnings: RangeAnalysis["parts"][number]["warnings"] }>(
+      "/theory/validate/range",
+      { musicxml },
+    ),
+  validateVoicing: (musicxml: string) =>
+    post<VoicingValidation>("/theory/validate/voicing", { musicxml }),
+  validateRhythm: (musicxml: string) =>
+    post<RhythmValidation>("/theory/validate/rhythm", { musicxml }),
+
+  /* --------------------- transposition (Pillar 2) -------------------- */
+  transposeRegion: (req: TransposeRegionRequest) =>
+    post<TransposeRegionResult>("/theory/transpose-region", req),
 };
 
 export { ApiError };

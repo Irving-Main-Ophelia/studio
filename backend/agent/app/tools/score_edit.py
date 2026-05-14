@@ -261,9 +261,7 @@ def toggle_articulation(
         cls_expr: type[expressions.Expression] = cls
         present_e = [a for a in existing.expressions if isinstance(a, cls_expr)]
         if present_e:
-            existing.expressions = [
-                a for a in existing.expressions if not isinstance(a, cls_expr)
-            ]
+            existing.expressions = [a for a in existing.expressions if not isinstance(a, cls_expr)]
             action = "removed"
         else:
             existing.expressions.append(cls_expr())

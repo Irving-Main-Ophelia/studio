@@ -16,7 +16,11 @@ dependencies = [
     "music21>=9.3",
     "python-dotenv>=1.0",
     "httpx>=0.27",
+    "stockhausen-theory",
 ]
+
+[tool.uv.sources]
+stockhausen-theory = { path = "../../packages/theory/python", editable = true }
 
 [dependency-groups]
 dev = [
