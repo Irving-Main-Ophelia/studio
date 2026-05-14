@@ -59,9 +59,41 @@ export interface ToolCallRecord {
   error: boolean;
 }
 
+export interface DiffWarning {
+  kind: string;
+  detail: string;
+  measure: number | null;
+  beat: number | null;
+}
+
+export interface DiffOperation {
+  kind:
+    | "score_replace"
+    | "score_transpose"
+    | "score_modulate"
+    | "score_reharmonize"
+    | "score_add_section"
+    | "score_replace_bars"
+    | "score_respell_enharmonic";
+  description: string;
+  forward: Record<string, unknown>;
+  inverse: Record<string, unknown>;
+}
+
+export interface ScoreDiff {
+  diff_id: string;
+  base_score_hash: string;
+  description: string;
+  operations: DiffOperation[];
+  warnings: DiffWarning[];
+  preview_musicxml: string;
+  tool: string;
+}
+
 export interface ChatResult {
   reply: string;
   tool_calls: ToolCallRecord[];
+  diffs: ScoreDiff[];
 }
 
 /* ------------------------ score edit (M1.1) ------------------------- */
@@ -238,6 +270,35 @@ export const api = {
   /* --------------------- transposition (Pillar 2) -------------------- */
   transposeRegion: (req: TransposeRegionRequest) =>
     post<TransposeRegionResult>("/theory/transpose-region", req),
+
+  /* --------------------- theory tutor (Pillar 8) --------------------- */
+  explain: (musicxml: string, measure_start: number, measure_end: number) =>
+    post<{
+      key: { tonic: string; mode: string };
+      chords: Array<{
+        measure: number;
+        beat: number;
+        pitches: string[];
+        roman: string;
+        symbol: string;
+      }>;
+      cadences: Array<{
+        kind: "authentic" | "plagal" | "half" | "deceptive";
+        measure: number;
+        beat: number;
+        roman_progression: [string, string];
+      }>;
+      voice_leading: Array<{
+        voices: [string, string];
+        intervals: Array<{
+          measure: number;
+          beat: number;
+          interval: string;
+          midi: [number, number];
+        }>;
+      }>;
+      region: { measure_start: number; measure_end: number };
+    }>("/theory/explain", { musicxml, measure_start, measure_end }),
 };
 
 export { ApiError };

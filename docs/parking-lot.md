@@ -30,3 +30,16 @@ and a one-line note about why it was deferred.
   command shipped. Real C++ link drops in behind the same surface.
 - **Per-track output meters in the mixer (M1.2, deferred).** Need AnalyserNodes
   per channel; slipping to M1.5 polish.
+- **`score.reharmonize` real implementation (M1.4, deferred to Phase 2).** Today
+  ships as an empty-diff stub with a `phase1_stub` warning. The tool surface +
+  ScoreDiff contract is locked (ADR-0012), so the body swap is local. Needs
+  chord-substitution + voice-leading rewrite.
+- **`score.add_section` generator integration (M1.4, deferred to Phase 2).** Same
+  shape: stub today, Anticipatory Music Transformer / Moonbeam integration on
+  Modal arrives in Phase 2 (NORTH_STAR §6 roadmap).
+- **`theory.analyze_form` real form analysis (M1.4, deferred to Phase 2).** Today
+  returns a single `undivided` section. Real period/phrase/section detection
+  needs a dedicated analyzer + ground-truth fixtures.
+- **Stale-diff UI prompt (M1.4, partial).** The diff already carries
+  `base_score_hash`; the M1.4 UI does not yet detect a mismatch and prompt
+  "this proposal is based on an older version". Land in M1.5 polish.

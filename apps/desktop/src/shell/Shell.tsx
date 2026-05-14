@@ -1,13 +1,14 @@
 import { useState } from "react";
 
+import { DiffOverlay } from "../agent/DiffOverlay";
 import { useEditorKeyboard } from "../editor/useEditorKeyboard";
 import { useScoreEngine } from "../lib/ScoreEngine";
 import { useKeyboardShortcuts } from "../lib/useKeyboardShortcuts";
 import { NewProjectDialog } from "../project/NewProjectDialog";
 import { RecoveryBanner } from "../project/RecoveryBanner";
-import { AgentPanel } from "./AgentPanel";
 import { BottomRail } from "./BottomRail";
 import { ProjectTree } from "./ProjectTree";
+import { RightRail } from "./RightRail";
 import { ScorePane } from "./ScorePane";
 import { TopBar } from "./TopBar";
 
@@ -76,8 +77,9 @@ export function Shell({ info }: { info: AppInfo }) {
           <ScorePane />
           <BottomRail />
         </main>
-        <AgentPanel />
+        <RightRail />
       </div>
+      <DiffOverlay />
     </div>
   );
 }

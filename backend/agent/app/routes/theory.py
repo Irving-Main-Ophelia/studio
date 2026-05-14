@@ -24,6 +24,8 @@ from stockhausen_theory import (
     validate_voicing,
 )
 
+from app.agent_tools import theory_explain
+
 router = APIRouter(prefix="/theory", tags=["theory"])
 
 
@@ -117,6 +119,24 @@ def route_v_voicing(req: ScoreIn) -> dict[str, Any]:
 def route_v_rhythm(req: ScoreIn) -> dict[str, Any]:
     try:
         return validate_rhythm(req.musicxml)
+    except Exception as exc:  # noqa: BLE001
+        raise _bad(str(exc)) from exc
+
+
+class ExplainIn(ScoreIn):
+    measure_start: int = Field(..., ge=1)
+    measure_end: int = Field(..., ge=1)
+
+
+@router.post("/explain")
+def route_explain(req: ExplainIn) -> dict[str, Any]:
+    """Pillar-8 Theory Tutor digest for a measure range."""
+    try:
+        return theory_explain(
+            req.musicxml,
+            measure_start=req.measure_start,
+            measure_end=req.measure_end,
+        )
     except Exception as exc:  # noqa: BLE001
         raise _bad(str(exc)) from exc
 

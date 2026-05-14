@@ -31,6 +31,7 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     reply: str
     tool_calls: list[dict[str, Any]]
+    diffs: list[dict[str, Any]] = Field(default_factory=list)
 
 
 @router.post("/agent/chat", response_model=ChatResponse)
@@ -49,4 +50,8 @@ async def chat(req: ChatRequest) -> ChatResponse:
         messages=[m.model_dump() for m in req.messages],
         score_musicxml=req.score_musicxml,
     )
-    return ChatResponse(reply=result.reply, tool_calls=result.tool_calls)
+    return ChatResponse(
+        reply=result.reply,
+        tool_calls=result.tool_calls,
+        diffs=[d.model_dump(mode="json") for d in result.diffs],
+    )

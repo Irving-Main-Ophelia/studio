@@ -1,6 +1,10 @@
 """Thin wrapper around the Anthropic SDK for our tool-using agent.
 
-Phase 0 exposes a single tool: ``theory.analyze_key``. Each phase adds more.
+Phase 0 exposed two tools. Phase 1 (M1.4) ships the full 10-tool surface
+from PHASE_1.md §1.6 — every score-mutating tool returns a ``ScoreDiff``;
+read-only tools return analyzer payloads. The agent loop runs up to 8
+round-trips, escalates to Claude Opus 4.7 for planner-heavy tools, and
+collects every diff so the route layer can hand them to the UI overlay.
 """
 
 from __future__ import annotations
@@ -11,78 +15,50 @@ from typing import Any, cast
 from anthropic import AsyncAnthropic
 from anthropic.types import MessageParam, ToolParam, ToolUseBlock
 
+from app.agent_tools import build_tool_descriptors, dispatch_tool
 from app.config import get_settings
-from app.tools.theory import analyze_key, transpose_musicxml
+from app.score_diff import ScoreDiff
+
+# Tools that benefit from heavier reasoning. We escalate the *model* to
+# Opus when one of these is the most recent tool the agent invoked.
+PLANNER_TOOLS: set[str] = {
+    "theory_analyze_form",
+    "score_add_section",
+    "score_reharmonize",
+}
 
 SYSTEM_PROMPT = (
     "You are the Stockhausen co-composer. You assist a classically trained "
     "musician. You are precise, theory-aware, and concise.\n\n"
     "Rules:\n"
-    "- Use the provided tools rather than guessing.\n"
-    "- The user's current score is attached at the end of their message as MusicXML.\n"
-    "  When a tool needs `musicxml`, copy that attached MusicXML verbatim.\n"
-    "- For transposition, target keys can be written 'Gm', 'F#m', 'Bb', 'A major', etc.\n"
-    "- Reply in the user's language (Spanish or English). Keep replies tight: at most\n"
-    "  three sentences unless explicitly asked to elaborate.\n"
+    "- Use the provided tools rather than guessing. Every score-mutating tool\n"
+    "  (score.transpose, score.modulate, score.reharmonize, score.add_section,\n"
+    "  score.replace_bars) returns a ScoreDiff — you do not need to repeat the\n"
+    "  resulting MusicXML in your reply.\n"
+    "- The user's current score is attached at the end of their message as\n"
+    "  MusicXML; the backend feeds it to every tool automatically.\n"
+    "- For transposition / modulation, target keys can be written 'Gm', 'F#m',\n"
+    "  'Bb', 'A major', etc.\n"
+    "- Reply in the user's language (Spanish or English). Keep replies tight:\n"
+    "  at most three sentences unless explicitly asked to elaborate.\n"
     "- Never invent notes. Only call tools that produce verifiable edits."
 )
-
-# Anthropic constrains tool names to ^[a-zA-Z0-9_-]{1,64}$ — no dots.
-# We keep namespaces as underscores. The UI prettifies these back to dots.
-TOOLS: list[dict[str, Any]] = [
-    {
-        "name": "theory_analyze_key",
-        "description": (
-            "Estimate the tonal center of a MusicXML score using "
-            "Krumhansl-Schmuckler. Returns the key, mode, and confidence."
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "musicxml": {
-                    "type": "string",
-                    "description": "Full MusicXML 4.0 score to analyze.",
-                }
-            },
-            "required": ["musicxml"],
-        },
-    },
-    {
-        "name": "score_transpose",
-        "description": (
-            "Transpose a MusicXML score to a target key. Returns the new "
-            "MusicXML plus the source key, target key, and interval."
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "musicxml": {
-                    "type": "string",
-                    "description": "Full MusicXML 4.0 score to transpose.",
-                },
-                "target_key": {
-                    "type": "string",
-                    "description": "Target key: 'F#m', 'Bb', 'A major', etc.",
-                },
-            },
-            "required": ["musicxml", "target_key"],
-        },
-    },
-]
 
 
 @dataclass
 class AgentReply:
     reply: str
     tool_calls: list[dict[str, Any]] = field(default_factory=list)
+    diffs: list[ScoreDiff] = field(default_factory=list)
 
 
 class AnthropicAgent:
-    """One-shot tool-use loop. Phase 0: simple call, Phase 1 will extend."""
+    """Tool-use loop with diff-aware tooling and planner escalation (M1.4)."""
 
     def __init__(self) -> None:
         self.settings = get_settings()
         self._client: AsyncAnthropic | None = None
+        self._tool_descriptors: list[ToolParam] = build_tool_descriptors()
 
     @property
     def is_configured(self) -> bool:
@@ -93,15 +69,11 @@ class AnthropicAgent:
             self._client = AsyncAnthropic(api_key=self.settings.anthropic_api_key)
         return self._client
 
-    def _run_tool(self, name: str, args: dict[str, Any]) -> Any:
-        if name == "theory_analyze_key":
-            return analyze_key(args.get("musicxml", ""))
-        if name == "score_transpose":
-            return transpose_musicxml(
-                args.get("musicxml", ""),
-                args.get("target_key", "C"),
-            )
-        raise ValueError(f"Unknown tool: {name}")
+    def _pick_model(self, last_tool: str | None) -> str:
+        """Escalate to Opus 4.7 when the LLM is in planner territory."""
+        if last_tool in PLANNER_TOOLS:
+            return self.settings.anthropic_planner_model
+        return self.settings.anthropic_model
 
     async def respond(
         self,
@@ -119,14 +91,15 @@ class AnthropicAgent:
                 )
 
         tool_calls: list[dict[str, Any]] = []
+        diffs: list[ScoreDiff] = []
+        last_tool: str | None = None
 
-        # Up to 4 tool round-trips per turn in Phase 0; Phase 1 raises this.
-        for _ in range(4):
+        for _ in range(self.settings.agent_max_round_trips):
             response = await client.messages.create(
-                model=self.settings.anthropic_model,
-                max_tokens=1024,
+                model=self._pick_model(last_tool),
+                max_tokens=2048,
                 system=SYSTEM_PROMPT,
-                tools=cast("list[ToolParam]", TOOLS),
+                tools=self._tool_descriptors,
                 messages=cast("list[MessageParam]", history),
             )
 
@@ -140,22 +113,40 @@ class AnthropicAgent:
                     text_value = getattr(block, "text", None)
                     if isinstance(text_value, str):
                         text_parts.append(text_value)
-                return AgentReply(reply="".join(text_parts).strip(), tool_calls=tool_calls)
+                return AgentReply(
+                    reply="".join(text_parts).strip(),
+                    tool_calls=tool_calls,
+                    diffs=diffs,
+                )
 
             tool_name = tool_use.name
+            last_tool = tool_name
             tool_args = cast("dict[str, Any]", tool_use.input)
             try:
-                tool_result: Any = self._run_tool(tool_name, tool_args)
+                payload, maybe_diff = dispatch_tool(tool_name, tool_args, score_musicxml)
+                if maybe_diff is not None:
+                    diffs.append(maybe_diff)
+                    # Once a diff is produced, the tool result we feed back to
+                    # the LLM is intentionally compact — the agent should
+                    # narrate the diff, not re-emit the MusicXML.
+                    feedback: Any = {
+                        "diff_id": maybe_diff.diff_id,
+                        "description": maybe_diff.description,
+                        "warnings": [w.model_dump() for w in maybe_diff.warnings],
+                    }
+                else:
+                    feedback = payload
                 error = False
-            except Exception as exc:  # noqa: BLE001 — broad on purpose, returned to model
-                tool_result = {"error": str(exc)}
+            except Exception as exc:  # noqa: BLE001 — returned to the model
+                feedback = {"error": str(exc)}
+                payload = feedback
                 error = True
 
             tool_calls.append(
                 {
                     "tool": tool_name,
                     "input": tool_args,
-                    "output": tool_result,
+                    "output": payload,
                     "error": error,
                 }
             )
@@ -168,11 +159,15 @@ class AnthropicAgent:
                         {
                             "type": "tool_result",
                             "tool_use_id": tool_use.id,
-                            "content": str(tool_result),
+                            "content": str(feedback),
                             "is_error": error,
                         }
                     ],
                 }
             )
 
-        return AgentReply(reply="(Tool loop exhausted)", tool_calls=tool_calls)
+        return AgentReply(
+            reply="(Tool loop exhausted)",
+            tool_calls=tool_calls,
+            diffs=diffs,
+        )

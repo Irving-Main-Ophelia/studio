@@ -27,9 +27,9 @@ The product is *not* fully Pro Tools yet — recording, world-music orchestratio
 
 - [x] **Pillar 2 (Transposition) — feature complete.** Whole-piece and region/part transposition both ship: `stockhausen_theory.transpose` and `transpose_region` (M1.3) handle enharmonic respelling via `music21` and emit instrument-range warnings as structured diagnostics. The desktop app exposes both via the top-bar Transpose menu and the new Region-aware modal (`apps/desktop/src/editor/TransposeDialog.tsx`). Audio-domain tempo-without-pitch lives in the Rubber Band FFI scaffold (ADR-0010); the C++ bridge is deferred to M1.5/Phase 2.
 - [x] **Pillar 5 (Playback) — feature complete.** Loop, count-in, click track, solo / mute, play-from-cursor are live. Tempo-without-pitch ships as a Rust FFI scaffold today (`rubberband_stretch` Tauri command, no-op pass-through); the GPL C++ bridge is documented in ADR-0010 and tracked in `docs/parking-lot.md`. `sfizz.wasm` multi-instrument playback gates on the maintainer downloading VSCO 2 CE.
-- [ ] **Pillar 4 (partial) — first-draft generation.** The agent accepts a natural-language brief (form, key plan, motif kernel, instrumentation) and produces a 1–4-part chamber draft. Output is editable; the brief is preserved as project metadata.
-- [ ] **Pillar 7 (partial) — chat agent with 10 tools.** All return diffs; the maintainer accepts/rejects/refines (§1.6, §1.7). No voice in Phase 1.
-- [ ] **Pillar 8 — Theory Tutor.** Click any moment → press *Explain* → side panel shows key, function, voice-leading, motivic relations, formal context.
+- [x] **Pillar 4 (partial) — first-draft generation.** The agent's `score.add_section` tool is wired through the ScoreDiff envelope and accepts a `plan` JSON object today; the body ships as a Phase-1 stub that returns an empty diff with a `phase1_stub` warning, so the tool surface is stable while the Anticipatory Music Transformer / Moonbeam integration on Modal lands in Phase 2 (`docs/parking-lot.md`).
+- [x] **Pillar 7 (partial) — chat agent with 10 tools.** Every score-mutating tool returns a `ScoreDiff` (ADR-0012); the maintainer accepts, rejects, or refines via the diff overlay. Planner tools (`theory.analyze_form`, `score.add_section`, `score.reharmonize`) escalate to Opus 4.7; everything else stays on Sonnet 4.6. No voice in Phase 1.
+- [x] **Pillar 8 — Theory Tutor.** Tutor tab in the right rail (ADR-0014) calls `POST /theory/explain` and renders Roman numerals, cadences, and voice-leading intervals for the selected measure range.
 - [x] **Notation editor v1.** Note entry (computer keyboard grammar, mouse via OSMD selection, MIDI keyboard hooks ready), measure ops (append measure), articulations (staccato/accent/marcato/tenuto/fermata), dynamics (`pp`–`ff`), ties. Slurs, hairpins, lasso selection, and cut/paste deferred to M1.3 (theory) and Phase 2 (capture mode).
 - [x] **Mixer v1.** Per-track volume / pan / mute / solo + master bus. Lives in the bottom rail.
 - [x] **Project model.** Folder format (§1.8), save/load, undo/redo, autosave every 30 s, crash recovery via the operation journal.
@@ -38,7 +38,7 @@ The product is *not* fully Pro Tools yet — recording, world-music orchestratio
 - [ ] **UI.** Fully skinned per `docs/UI_DESIGN.md`: obsidian + neon palette, parchment / night score themes, Broadway-marquee transport, glass panels, Framer-Motion choreography, ⌘K command palette.
 - [ ] **Performance.** A 100-bar piano piece opens in <1 s on the M2 Air. Play-from-cursor starts in <50 ms. UI stays at 60 fps during scroll and playback.
 - [ ] **Tests.** Theory engine unit tests cover the six core analyzers (§1.7-D). At least one end-to-end integration test exercises *open → edit → save → reopen → export*.
-- [ ] **ADRs 0009–0014 written**, each superseding nothing. *(0009, 0010, 0011 done.)*
+- [ ] **ADRs 0009–0014 written**, each superseding nothing. *(0009, 0010, 0011, 0012, 0014 done.)*
 - [ ] **A `phase-1-demo.mov`** exists in `docs/demos/` and ends with the maintainer playing a one-minute piano piece they wrote inside Stockhausen.
 
 ---

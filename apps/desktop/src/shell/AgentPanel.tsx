@@ -36,11 +36,11 @@ export function AgentPanel() {
   };
 
   return (
-    <aside className="flex w-80 shrink-0 flex-col border-l border-obsidian-700 bg-obsidian-800/40">
-      <div className="flex items-center justify-between border-b border-obsidian-700 px-3 py-2 text-xs">
+    <div className="flex h-full flex-col">
+      <div className="flex shrink-0 items-center justify-between border-b border-obsidian-700 px-3 py-2 text-xs">
         <div className="flex items-center gap-2 text-zinc-400">
           <Sparkles size={12} className="text-neon-cyan" />
-          <span className="font-medium tracking-wide text-zinc-200">Agent</span>
+          <span className="font-medium tracking-wide text-zinc-200">Conversation</span>
         </div>
         <span className="num text-[10px] uppercase tracking-widest text-zinc-500">
           {engine.chatBusy ? "thinking…" : offline ? "offline" : "idle"}
@@ -110,7 +110,7 @@ export function AgentPanel() {
           for newline
         </p>
       </div>
-    </aside>
+    </div>
   );
 }
 

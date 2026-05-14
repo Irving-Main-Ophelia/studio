@@ -56,6 +56,7 @@ import {
   type Dynamic,
   type ExtractedScore,
   type KeyEstimate,
+  type ScoreDiff,
   type TieType,
   type ToolCallRecord,
 } from "./api";
@@ -108,6 +109,11 @@ interface ScoreEngineValue {
   loop: LoopRegion | null;
   clickEnabled: boolean;
   countInBars: number;
+
+  /* --- agent diff slice (M1.4) ------------------------------------ */
+  pendingDiff: ScoreDiff | null;
+  acceptPendingDiff: () => Promise<void>;
+  rejectPendingDiff: () => void;
 
   loadFromXml: (filename: string, musicxml: string) => Promise<void>;
   loadFromUrl: (url: string, filename?: string) => Promise<void>;
@@ -181,6 +187,10 @@ export function ScoreEngineProvider({ children }: { children: React.ReactNode })
   const [chat, setChat] = useState<ChatTurn[]>([]);
   const [chatBusy, setChatBusy] = useState(false);
   const [chatError, setChatError] = useState<string | null>(null);
+
+  /* M1.4 — pending agent diff. Holds at most one diff at a time so the UI
+   * never shows competing previews; the next tool call replaces it. */
+  const [pendingDiff, setPendingDiff] = useState<ScoreDiff | null>(null);
 
   const [backendOnline, setBackendOnline] = useState<boolean | null>(null);
 
@@ -1055,27 +1065,11 @@ export function ScoreEngineProvider({ children }: { children: React.ReactNode })
           },
         ]);
 
-        // If a transposition tool ran, fold it into the project as an operation.
-        const transposeCall = reply.tool_calls.find(
-          (c) => c.tool === "score_transpose" && !c.error,
-        );
-        if (transposeCall && score) {
-          const output = transposeCall.output as
-            | { musicxml?: string; from_key?: string; to_key?: string; interval?: string }
-            | undefined;
-          if (output?.musicxml) {
-            const op = buildScoreTransposeOp(
-              {
-                previousMusicXml: score.musicxml,
-                nextMusicXml: output.musicxml,
-                fromKey: output.from_key ?? null,
-                toKey: output.to_key ?? "?",
-                interval: output.interval ?? null,
-              },
-              opLogRef.current.nextIndex,
-            );
-            await applyAndPersistOperation(output.musicxml, op);
-          }
+        // Stage the latest score-mutating diff so the overlay can preview it.
+        // If a chain of mutating tools ran in one turn, we present the last
+        // (which is what the assistant just summarised).
+        if (reply.diffs && reply.diffs.length > 0) {
+          setPendingDiff(reply.diffs[reply.diffs.length - 1]);
         }
       } catch (err) {
         const msg = err instanceof ApiError ? err.message : String(err);
@@ -1088,12 +1082,40 @@ export function ScoreEngineProvider({ children }: { children: React.ReactNode })
         setChatBusy(false);
       }
     },
-    [chat, score, applyAndPersistOperation],
+    [chat, score],
   );
 
   const resetChat = useCallback(() => {
     setChat([]);
     setChatError(null);
+    setPendingDiff(null);
+  }, []);
+
+  const acceptPendingDiff = useCallback(async () => {
+    if (!pendingDiff || !score) return;
+    // Map ScoreDiff into the operation-log shape. The diff already carries
+    // the inverse payload, so Undo composes naturally.
+    const op = buildScoreTransposeOp(
+      {
+        previousMusicXml: score.musicxml,
+        nextMusicXml: pendingDiff.preview_musicxml,
+        fromKey:
+          (pendingDiff.operations[0]?.forward as { from_key?: string } | undefined)?.from_key ??
+          null,
+        toKey:
+          (pendingDiff.operations[0]?.forward as { to_key?: string } | undefined)?.to_key ?? "?",
+        interval:
+          (pendingDiff.operations[0]?.forward as { interval?: string } | undefined)?.interval ??
+          null,
+      },
+      opLogRef.current.nextIndex,
+    );
+    await applyAndPersistOperation(pendingDiff.preview_musicxml, op);
+    setPendingDiff(null);
+  }, [pendingDiff, score, applyAndPersistOperation]);
+
+  const rejectPendingDiff = useCallback(() => {
+    setPendingDiff(null);
   }, []);
 
   const canUndo = useMemo(() => {
@@ -1171,6 +1193,9 @@ export function ScoreEngineProvider({ children }: { children: React.ReactNode })
       setCountIn,
       playFrom,
       playFromCursor,
+      pendingDiff,
+      acceptPendingDiff,
+      rejectPendingDiff,
     }),
     [
       score,
@@ -1236,6 +1261,9 @@ export function ScoreEngineProvider({ children }: { children: React.ReactNode })
       setCountIn,
       playFrom,
       playFromCursor,
+      pendingDiff,
+      acceptPendingDiff,
+      rejectPendingDiff,
     ],
   );
 

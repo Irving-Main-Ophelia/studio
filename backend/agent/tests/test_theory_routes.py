@@ -106,9 +106,7 @@ def test_validate_rhythm_runs(client: TestClient, bach_musicxml: str) -> None:
     assert "warnings" in body
 
 
-def test_transpose_region_first_two_measures(
-    client: TestClient, bach_musicxml: str
-) -> None:
+def test_transpose_region_first_two_measures(client: TestClient, bach_musicxml: str) -> None:
     res = client.post(
         "/theory/transpose-region",
         json={

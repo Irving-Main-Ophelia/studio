@@ -10,6 +10,13 @@ class Settings(BaseSettings):
 
     anthropic_api_key: str = ""
     anthropic_model: str = "claude-sonnet-4-6"
+    # Opus is reserved for planner-style tool calls (form analysis, section
+    # generation, reharmonization). The default is the same Sonnet model;
+    # set ANTHROPIC_PLANNER_MODEL in .env to override.
+    anthropic_planner_model: str = "claude-opus-4-7"
+
+    # Up to 8 tool round-trips per agent turn (Phase 1 budget; PHASE_1.md §1.6).
+    agent_max_round_trips: int = 8
 
     stockhausen_agent_host: str = "127.0.0.1"
     stockhausen_agent_port: int = 8000
