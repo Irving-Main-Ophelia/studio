@@ -24,7 +24,7 @@ from stockhausen_theory import (
     validate_voicing,
 )
 
-from app.agent_tools import theory_explain
+from app.agent_tools import theory_analyze_form, theory_explain
 
 router = APIRouter(prefix="/theory", tags=["theory"])
 
@@ -119,6 +119,15 @@ def route_v_voicing(req: ScoreIn) -> dict[str, Any]:
 def route_v_rhythm(req: ScoreIn) -> dict[str, Any]:
     try:
         return validate_rhythm(req.musicxml)
+    except Exception as exc:  # noqa: BLE001
+        raise _bad(str(exc)) from exc
+
+
+@router.post("/form")
+def route_form(req: ScoreIn) -> dict[str, Any]:
+    """Phase-2 form analysis: cadence-based phrase and section detection."""
+    try:
+        return theory_analyze_form(req.musicxml)
     except Exception as exc:  # noqa: BLE001
         raise _bad(str(exc)) from exc
 

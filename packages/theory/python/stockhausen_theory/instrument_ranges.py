@@ -56,6 +56,9 @@ INSTRUMENT_RANGE: dict[str, InstrumentRange] = {
     "bass": InstrumentRange("E2", "E4"),
     "guitar": InstrumentRange("E2", "E6"),
     "classical guitar": InstrumentRange("E2", "E6"),
+    "alto_saxophone": InstrumentRange("Bb3", "F6"),
+    "electric_guitar": InstrumentRange("E2", "E6"),
+    "bass_guitar": InstrumentRange("E1", "G4"),
 }
 
 

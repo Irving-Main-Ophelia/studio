@@ -25,6 +25,14 @@ OperationKind = Literal[
     "score_add_section",
     "score_replace_bars",
     "score_respell_enharmonic",
+    "score_change_instrument",
+    "score_add_part",
+    "score_remove_part",
+    "score_set_profile",
+    "score_set_tempo",
+    "score_vary_motif",
+    "guitar_add_techniques",
+    "guitar_generate_variation",
 ]
 
 

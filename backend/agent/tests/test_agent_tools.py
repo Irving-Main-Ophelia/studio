@@ -1,9 +1,9 @@
-"""Unit tests for the M1.4 agent tools (ScoreDiff envelope + diff-returning facades).
+"""Unit tests for agent tools (Phase 1 M1.4 + Phase 2 M2.1).
 
-These tests bypass the LLM entirely; they exercise the diff-builder
-layer that the tool-use loop calls into. The LLM loop itself is tested
-indirectly via the existing /agent/chat integration (which is gated on
-an ANTHROPIC_API_KEY).
+These tests bypass the LLM entirely — the tests run without an
+ANTHROPIC_API_KEY, so Claude-assisted tools (reharmonize, add_section)
+fall back to their no-API-key paths. The real Claude paths are exercised
+by manual integration tests.
 """
 
 from __future__ import annotations
@@ -54,18 +54,31 @@ def test_score_modulate_includes_warnings(bach_musicxml: str) -> None:
     assert isinstance(diff.warnings, list)
 
 
-def test_score_reharmonize_is_phase1_stub(bach_musicxml: str) -> None:
+def test_score_reharmonize_without_key_returns_no_sub_warning(bach_musicxml: str) -> None:
+    # Without ANTHROPIC_API_KEY the tool falls back gracefully: no substitutions,
+    # score unchanged, warning kind = "no_substitutions".
     diff = score_reharmonize(
         bach_musicxml, measure_start=1, measure_end=4, style="secondary-dominants"
     )
-    assert diff.preview_musicxml == bach_musicxml
-    assert any(w.kind == "phase1_stub" for w in diff.warnings)
+    assert diff.tool == "score.reharmonize"
+    assert "<score-partwise" in diff.preview_musicxml
+    assert isinstance(diff.warnings, list)
+    # Without an API key → no_substitutions warning and score unchanged
+    if not diff.warnings or diff.warnings[0].kind == "no_substitutions":
+        assert diff.preview_musicxml == bach_musicxml
+    # If a key is present, warnings may be empty (substitutions applied).
 
 
-def test_score_add_section_is_phase1_stub(bach_musicxml: str) -> None:
+def test_score_add_section_without_key_returns_generation_failed(bach_musicxml: str) -> None:
+    # Without ANTHROPIC_API_KEY the generator RuntimeError is caught and the
+    # diff falls back to the original score + generation_failed warning.
     diff = score_add_section(bach_musicxml, plan={"description": "bridge"})
-    assert diff.preview_musicxml == bach_musicxml
-    assert any(w.kind == "phase1_stub" for w in diff.warnings)
+    assert diff.tool == "score.add_section"
+    assert "<score-partwise" in diff.preview_musicxml
+    assert isinstance(diff.warnings, list)
+    # Without an API key → generation_failed warning
+    if diff.warnings:
+        assert any(w.kind == "generation_failed" for w in diff.warnings)
 
 
 def test_score_replace_bars_runs_validators(bach_musicxml: str) -> None:

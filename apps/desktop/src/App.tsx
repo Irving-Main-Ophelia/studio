@@ -4,12 +4,15 @@ import { invoke } from "@tauri-apps/api/core";
 import { Shell } from "./shell/Shell";
 import { NorthStar } from "./shell/NorthStar";
 import { ScoreEngineProvider } from "./lib/ScoreEngine";
+import { isTauri } from "./lib/tauri";
 
 interface AppInfo {
   name: string;
   version: string;
   phase: string;
 }
+
+const BROWSER_INFO: AppInfo = { name: "Stockhausen", version: "0.0.1", phase: "0" };
 
 /**
  * The app entry. Holds bootstrap state and renders either:
@@ -23,16 +26,20 @@ export function App() {
 
   useEffect(() => {
     const start = Date.now();
-    invoke<AppInfo>("app_info")
-      .catch((err) => {
-        console.error("failed to load app_info from native core:", err);
-        return { name: "Stockhausen", version: "0.0.1", phase: "0" };
-      })
-      .then((value) => {
-        const elapsed = Date.now() - start;
-        const wait = Math.max(0, 900 - elapsed);
-        window.setTimeout(() => setInfo(value), wait);
-      });
+    const p = isTauri()
+      ? invoke<AppInfo>("app_info").catch((err) => {
+          console.error("failed to load app_info from native core:", err);
+          return BROWSER_INFO;
+        })
+      : Promise.resolve(BROWSER_INFO);
+
+    void p.then((value) => {
+      const elapsed = Date.now() - start;
+      // In Tauri, hold the splash for at least 900ms while native modules load.
+      // In the browser there is nothing loading, so skip straight to the shell.
+      const wait = isTauri() ? Math.max(0, 900 - elapsed) : 0;
+      window.setTimeout(() => setInfo(value), wait);
+    });
   }, []);
 
   if (!info) {

@@ -1,18 +1,60 @@
 import { useEffect, useRef, useState } from "react";
-import { Send, Sparkles, Wrench } from "lucide-react";
+import { Music, Send, Sparkles, Wrench } from "lucide-react";
 
+import { BACKEND_URL } from "../lib/api";
 import { useScoreEngine, type ChatTurn } from "../lib/ScoreEngine";
 import type { ToolCallRecord } from "../lib/api";
 
 /**
  * Right rail — the agent chat panel.
  * Wired to POST /agent/chat with the current score attached.
+ * Shows a live score context strip (key, bars, tempo) above the chat.
  */
 export function AgentPanel() {
   const engine = useScoreEngine();
   const [draft, setDraft] = useState("");
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
+
+  // Auto-analysis: run key+progression whenever score changes
+  const [autoAnalysis, setAutoAnalysis] = useState<string | null>(null);
+  const prevScoreHashRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    const xml = engine.score?.musicxml;
+    if (!xml) { setAutoAnalysis(null); return; }
+    // simple hash to detect real changes
+    const hash = xml.length + xml.slice(0, 80);
+    if (hash === prevScoreHashRef.current) return;
+    prevScoreHashRef.current = hash;
+
+    // Fire-and-forget: light analysis
+    void (async () => {
+      try {
+        const [keyRes, progRes] = await Promise.all([
+          fetch(`${BACKEND_URL}/theory/progression`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ musicxml: xml }),
+          }),
+          fetch(`${BACKEND_URL}/theory/form`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ musicxml: xml }),
+          }),
+        ]);
+        const prog = keyRes.ok ? (await keyRes.json()) as { key?: string; mode?: string; chords?: unknown[] } : null;
+        const form = progRes.ok ? (await progRes.json()) as { sections?: { label: string }[] } : null;
+        const key = prog?.key ? `${prog.key} ${prog.mode ?? ""}`.trim() : null;
+        const chordCount = Array.isArray(prog?.chords) ? prog!.chords.length : 0;
+        const sections = form?.sections?.map((s) => s.label).join(" · ") ?? null;
+        setAutoAnalysis([key, chordCount ? `${chordCount} chords` : null, sections]
+          .filter(Boolean).join(" · "));
+      } catch {
+        // silent — analysis is best-effort
+      }
+    })();
+  }, [engine.score]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -46,6 +88,26 @@ export function AgentPanel() {
           {engine.chatBusy ? "thinking…" : offline ? "offline" : "idle"}
         </span>
       </div>
+
+      {/* Live score context strip — always visible when a score is loaded */}
+      {engine.score && (
+        <div className="shrink-0 border-b border-obsidian-700/60 bg-obsidian-800/40 px-3 py-1.5">
+          <div className="flex items-center gap-1.5 text-[10px] text-zinc-400">
+            <Music size={9} className="shrink-0 text-neon-violet/70" />
+            <span className="truncate font-medium text-zinc-300">
+              {engine.project?.meta.title ?? "Untitled"}
+            </span>
+            {engine.score.keyEstimate && (
+              <span className="ml-1 text-neon-cyan/80">
+                {engine.score.keyEstimate.key} {engine.score.keyEstimate.mode}
+              </span>
+            )}
+          </div>
+          {autoAnalysis && (
+            <p className="mt-0.5 truncate text-[9px] text-zinc-500">{autoAnalysis}</p>
+          )}
+        </div>
+      )}
 
       <div className="flex-1 space-y-3 overflow-y-auto p-3 text-sm">
         <AgentBubble role="assistant">

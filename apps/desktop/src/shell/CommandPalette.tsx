@@ -14,10 +14,12 @@ import {
   FolderOpen,
   GraduationCap,
   Music,
+  Music2,
   Plus,
   Repeat,
   RotateCcw,
   Save,
+  Sparkles,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 
@@ -39,6 +41,9 @@ interface CommandPaletteProps {
   onOpenNewProject: () => void;
   onOpenExport: () => void;
   onOpenTranspose: () => void;
+  onOpenGenerate: () => void;
+  onOpenOrchestration: () => void;
+  onOpenAudioImport: () => void;
   onFocusTutor: () => void;
 }
 
@@ -48,6 +53,9 @@ export function CommandPalette({
   onOpenNewProject,
   onOpenExport,
   onOpenTranspose,
+  onOpenGenerate,
+  onOpenOrchestration,
+  onOpenAudioImport,
   onFocusTutor,
 }: CommandPaletteProps): React.ReactElement | null {
   const engine = useScoreEngine();
@@ -149,6 +157,16 @@ export function CommandPalette({
       },
     },
     {
+      id: "agent.generate",
+      label: "Generate score…",
+      icon: <Sparkles size={14} />,
+      group: "agent",
+      run: () => {
+        onClose();
+        onOpenGenerate();
+      },
+    },
+    {
       id: "agent.transpose",
       label: "Transpose…",
       icon: <Music size={14} />,
@@ -157,6 +175,27 @@ export function CommandPalette({
       run: () => {
         onClose();
         onOpenTranspose();
+      },
+    },
+    {
+      id: "agent.orchestrate",
+      label: "Orchestrate…",
+      icon: <Music2 size={14} />,
+      group: "agent",
+      disabled: !engine.score,
+      run: () => {
+        onClose();
+        onOpenOrchestration();
+      },
+    },
+    {
+      id: "agent.audio-import",
+      label: "Import audio…",
+      icon: <Music2 size={14} />,
+      group: "agent",
+      run: () => {
+        onClose();
+        onOpenAudioImport();
       },
     },
     {

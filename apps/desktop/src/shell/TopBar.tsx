@@ -1,5 +1,20 @@
-import { useMemo, useState } from "react";
-import { Loader2, MapPin, Pause, Play, Repeat, Settings, Square } from "lucide-react";
+import { useMemo, useEffect, useRef, useState } from "react";
+import {
+  ChevronDown,
+  FileMusic,
+  FolderOpen,
+  Loader2,
+  MapPin,
+  Mic,
+  Music2,
+  Pause,
+  Play,
+  Plus,
+  Repeat,
+  Settings,
+  Square,
+  Upload,
+} from "lucide-react";
 
 import { TransposeDialog } from "../editor/TransposeDialog";
 import { useScoreEngine } from "../lib/ScoreEngine";
@@ -29,14 +44,29 @@ const PRESET_KEYS = [
   "C minor",
 ];
 
-/**
- * Top bar — the "Broadway marquee" transport.
- * Phase 0: working Play/Stop + key transposition.
- */
-export function TopBar({ info }: { info: AppInfo }) {
+interface TopBarProps {
+  info: AppInfo;
+  onNewProject: () => void;
+  onImportAudio: () => void;
+  onOpenMusicXml: () => void;
+  onExport: () => void;
+}
+
+export function TopBar({ info, onNewProject, onImportAudio, onOpenMusicXml, onExport }: TopBarProps) {
   const engine = useScoreEngine();
   const [showTranspose, setShowTranspose] = useState(false);
   const [showAdvancedTranspose, setShowAdvancedTranspose] = useState(false);
+  const [showFileMenu, setShowFileMenu] = useState(false);
+  const fileMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!showFileMenu) return;
+    const handler = (e: MouseEvent) => {
+      if (!fileMenuRef.current?.contains(e.target as Node)) setShowFileMenu(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [showFileMenu]);
 
   const isPlaying = engine.playerStatus === "playing";
   const isLoading = engine.playerStatus === "loading" || engine.loading;
@@ -59,6 +89,39 @@ export function TopBar({ info }: { info: AppInfo }) {
           v{info.version} · phase {info.phase}
         </span>
         <BackendStatus online={engine.backendOnline} />
+      </div>
+
+      {/* File menu */}
+      <div ref={fileMenuRef} className="relative no-drag">
+        <button
+          onClick={() => setShowFileMenu((v) => !v)}
+          className={[
+            "flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors",
+            showFileMenu
+              ? "bg-obsidian-700 text-zinc-100"
+              : "text-zinc-400 hover:bg-obsidian-700 hover:text-zinc-100",
+          ].join(" ")}
+        >
+          File
+          <ChevronDown size={10} className={showFileMenu ? "rotate-180 transition-transform duration-150" : "transition-transform duration-150"} />
+        </button>
+        {showFileMenu && (
+          <div className="absolute left-0 top-9 z-50 w-56 overflow-hidden rounded-xl border border-white/10 bg-obsidian-900/95 py-1.5 shadow-[0_20px_60px_rgba(0,0,0,0.6)] backdrop-blur-md">
+            <div className="px-3 pb-1 pt-0.5">
+              <span className="num text-[9px] uppercase tracking-[0.2em] text-zinc-600">Project</span>
+            </div>
+            <FileMenuItem icon={<Plus size={12} />} label="New Project" shortcut="N" onClick={() => { setShowFileMenu(false); onNewProject(); }} />
+            <div className="mx-3 my-1.5 border-t border-white/8" />
+            <div className="px-3 pb-1">
+              <span className="num text-[9px] uppercase tracking-[0.2em] text-zinc-600">Import</span>
+            </div>
+            <FileMenuItem icon={<Music2 size={12} />} label="Import Audio" sub="FLAC · MP3 · WAV" onClick={() => { setShowFileMenu(false); onImportAudio(); }} />
+            <FileMenuItem icon={<FileMusic size={12} />} label="Import MIDI" sub=".mid · .midi" onClick={() => { setShowFileMenu(false); onImportAudio(); }} />
+            <FileMenuItem icon={<FolderOpen size={12} />} label="Open MusicXML" sub=".xml · .musicxml" onClick={() => { setShowFileMenu(false); onOpenMusicXml(); }} />
+            <div className="mx-3 my-1.5 border-t border-white/8" />
+            <FileMenuItem icon={<Upload size={12} />} label="Export" shortcut="E" onClick={() => { setShowFileMenu(false); onExport(); }} />
+          </div>
+        )}
       </div>
 
       {/* Transport */}
@@ -88,6 +151,18 @@ export function TopBar({ info }: { info: AppInfo }) {
           disabled={!canPlay || !engine.project}
           onClick={() => void engine.playFromCursor()}
           icon={<MapPin size={14} />}
+        />
+        <TransportButton
+          label={engine.recordMode ? "Stop recording" : "Record (MIDI step-time)"}
+          disabled={!engine.project}
+          highlighted={engine.recordMode}
+          onClick={() => engine.setRecordMode(!engine.recordMode)}
+          icon={
+            <Mic
+              size={14}
+              className={engine.recordMode ? "animate-pulse text-danger" : ""}
+            />
+          }
         />
         <TransportButton
           label={engine.loop ? "Clear loop" : "Loop last 4 bars"}
@@ -250,6 +325,40 @@ function TransposePanel({
         </span>
       </p>
     </div>
+  );
+}
+
+function FileMenuItem({
+  icon,
+  label,
+  sub,
+  shortcut,
+  onClick,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  sub?: string;
+  shortcut?: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="group flex w-full items-center gap-2.5 px-3 py-1.5 text-left transition-colors hover:bg-white/5"
+    >
+      <span className="text-zinc-600 transition-colors group-hover:text-neon-violet">{icon}</span>
+      <span className="flex-1 text-xs font-medium text-zinc-300 transition-colors group-hover:text-zinc-100">
+        {label}
+        {sub && <span className="ml-1.5 text-[9px] font-normal text-zinc-600">{sub}</span>}
+      </span>
+      {shortcut && (
+        <span className="num flex items-center gap-0.5 text-[9px] text-zinc-700">
+          <span className="rounded bg-white/5 px-1 py-0.5">⌘</span>
+          <span className="rounded bg-white/5 px-1 py-0.5">{shortcut}</span>
+        </span>
+      )}
+    </button>
   );
 }
 

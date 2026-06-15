@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { isTauri } from "./tauri";
 
 export interface AudioMeterState {
   running: boolean;
@@ -38,6 +39,7 @@ export function useAudioMeter() {
   const peakRef = useRef(0);
 
   useEffect(() => {
+    if (!isTauri()) return;
     let unlisten: UnlistenFn | null = null;
     listen<MeterEvent>("audio:meter", (evt) => {
       const next = evt.payload;
@@ -58,6 +60,7 @@ export function useAudioMeter() {
   }, []);
 
   const start = useCallback(async () => {
+    if (!isTauri()) return;
     try {
       const res = await invoke<MeterStartResponse>("start_input_meter");
       setState((s) => ({
@@ -76,6 +79,7 @@ export function useAudioMeter() {
   }, []);
 
   const stop = useCallback(async () => {
+    if (!isTauri()) return;
     try {
       await invoke("stop_input_meter");
       peakRef.current = 0;

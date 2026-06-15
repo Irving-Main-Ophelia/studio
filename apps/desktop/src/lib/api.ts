@@ -253,6 +253,24 @@ export const api = {
   cadences: (musicxml: string) => post<CadenceAnalysis>("/theory/cadences", { musicxml }),
   motifs: (musicxml: string, n = 4, min_occurrences = 2) =>
     post<MotifAnalysis>("/theory/motifs", { musicxml, n, min_occurrences }),
+  formAnalysis: (musicxml: string) =>
+    post<{
+      key: { tonic: string; mode: string; confidence: number };
+      total_measures: number;
+      phrases: Array<{
+        measure_start: number;
+        measure_end: number;
+        cadence_kind: string | null;
+        cadence_roman: [string, string] | null;
+      }>;
+      sections: Array<{
+        name: string;
+        measure_start: number;
+        measure_end: number;
+        phrase_count: number;
+        closes_with: string | null;
+      }>;
+    }>("/theory/form", { musicxml }),
 
   /* --------------------- theory validators (M1.3) -------------------- */
   validateVoiceLeading: (musicxml: string) =>
@@ -270,6 +288,108 @@ export const api = {
   /* --------------------- transposition (Pillar 2) -------------------- */
   transposeRegion: (req: TransposeRegionRequest) =>
     post<TransposeRegionResult>("/theory/transpose-region", req),
+
+  /* --------------------- score generator (Pillar 4) ----------------- */
+  generateScore: (
+    prompt: string,
+    constraints?: {
+      key?: string;
+      time?: string;
+      bars?: number;
+      style?: string;
+      texture?: string;
+      tempo_bpm?: number;
+      parts?: string;
+    },
+  ) =>
+    post<{ musicxml: string; script: string; description: string }>(
+      "/generate/score",
+      { prompt, constraints: constraints ?? {} },
+    ),
+
+  /* --------------------- orchestration (Pillar 6) -------------------- */
+  listProfiles: () =>
+    get<Array<{ name: string; display_name: string }>>("/orchestration/profiles"),
+
+  applyProfile: (
+    musicxml: string,
+    profile: string,
+  ) =>
+    post<{
+      musicxml: string;
+      profile: { name: string; display_name: string; slots: Array<{ name: string; instrument_key: string }> };
+      assignment: Array<{ slot_index: number; slot_name: string; source_part_index: number | null; source_part_name: string | null }>;
+      warnings: Array<{ slot_index: number; slot_name: string; kind: string; pitch: string; midi: number; measure: number }>;
+    }>("/orchestration/apply", { musicxml, profile }),
+
+  /* --------------------- audio import (Pillar 11) -------------------- */
+  audioCapabilities: () =>
+    get<{ stem_separation: boolean; transcription: boolean; requires_modal: boolean; note: string }>(
+      "/audio/capabilities",
+    ),
+
+  audioImport: (filename: string) =>
+    post<{ status: string; reason: string; stems: unknown[]; musicxml: string | null; project_id: string | null }>(
+      "/audio/import",
+      { filename },
+    ),
+
+  /* --------------------- production exports (Pillar 12) -------------- */
+  exportClickTrack: (musicxml: string, tempo_bpm?: number, beats_per_bar?: number) =>
+    post<{ wav_b64: string; tempo_bpm: number; beats_per_bar: number; duration_sec: number }>(
+      "/export/click-track",
+      { musicxml, tempo_bpm, beats_per_bar },
+    ),
+
+  exportMinusOne: (musicxml: string, omit_part_index: number) =>
+    post<{ status: string; reason: string; omit_part_name: string }>(
+      "/export/minus-one",
+      { musicxml, omit_part_index },
+    ),
+
+  exportStems: (musicxml: string) =>
+    post<{ status: string; reason: string; parts: Array<{ index: number; name: string }> }>(
+      "/export/stems",
+      { musicxml },
+    ),
+
+  /* --------------------- multi-agent panel (Pillar 7 P3) ------------- */
+  consultPanel: (
+    message: string,
+    score_musicxml?: string | null,
+  ) =>
+    post<{
+      summary: string;
+      contributions: Array<{ agent: string; role: string; reply: string; tool_calls: unknown[] }>;
+      diffs: unknown[];
+      tool_calls: unknown[];
+    }>("/agent/panel", { message, score_musicxml: score_musicxml ?? null }),
+
+  /* --------------------- practice coach (Pillar 10) ------------------ */
+  practiceCompare: (target_musicxml: string, performance_musicxml: string) =>
+    post<{
+      total_measures: number;
+      total_errors: number;
+      errors_by_measure: Array<{ measure: number; missing: number; extra: number; timing_errors: number; total: number }>;
+      heat_map: Array<{ measure: number; error_count: number; severity: "low" | "medium" | "high" }>;
+      practice_plan: Array<{ priority: number; measure: number; error_count: number; focus: string }>;
+    }>("/practice/compare", { target_musicxml, performance_musicxml }),
+
+  practicePlan: (target_musicxml: string, performance_musicxml: string) =>
+    post<{ practice_plan: Array<{ priority: number; measure: number; error_count: number; focus: string }> }>(
+      "/practice/plan",
+      { target_musicxml, performance_musicxml },
+    ),
+
+  /* --------------------- composer style (Pillar 1) ------------------- */
+  listComposers: () =>
+    get<Array<{ id: string; display_name: string; status: string; note: string }>>("/style/composers"),
+
+  applyStyle: (musicxml: string, composer_id: string, intensity = 0.4) =>
+    post<{ status: string; reason: string; composer_id: string; intensity: number; musicxml: string }>(
+      "/style/apply",
+      { musicxml, composer_id, intensity },
+    ),
 
   /* --------------------- theory tutor (Pillar 8) --------------------- */
   explain: (musicxml: string, measure_start: number, measure_end: number) =>

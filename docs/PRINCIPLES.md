@@ -26,7 +26,7 @@
 
 ## Code & repo conventions
 
-1. **English everywhere.** Code, comments, commits, docs, error messages, UI strings (i18n later).
+1. **English everywhere.** Code, comments, commits, docs, error messages, UI strings (i18n later). Exception: agent system prompts may be in Spanish — that is the composer's working language. No other surface gets this exception.
 2. **TypeScript strict.** No `any` without justification.
 3. **Rust 2024 edition.** `cargo clippy` clean, `cargo fmt` enforced.
 4. **Python 3.12+** for the backend. Type-annotated. `ruff` + `mypy --strict`.

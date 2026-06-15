@@ -1,17 +1,21 @@
 import {
+  Check,
   FileMusic,
   FolderOpen,
   Music2,
+  Pencil,
   Plus,
   Save,
   Trash2,
   Undo2,
+  Upload,
   X,
 } from "lucide-react";
+import { useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 
 import { useScoreEngine } from "../lib/ScoreEngine";
-import { projectPersistence } from "../project/persistence";
+import { isTauri } from "../lib/tauri";
 
 interface OpenedScore {
   filename: string;
@@ -36,42 +40,90 @@ const FIXTURES: Array<{ file: string; label: string; composer: string }> = [
   },
 ];
 
-export function ProjectTree({ onNewProject }: { onNewProject: () => void }) {
+export function ProjectTree({
+  onNewProject,
+  onOpenAudioImport,
+}: {
+  onNewProject: () => void;
+  onOpenAudioImport: () => void;
+}) {
   const engine = useScoreEngine();
+  const [renaming, setRenaming] = useState(false);
+  const [renameValue, setRenameValue] = useState("");
+  const renameInputRef = useRef<HTMLInputElement>(null);
+  const xmlInputRef = useRef<HTMLInputElement>(null);
+  const [deletingPath, setDeletingPath] = useState<string | null>(null);
+
+  const startRename = () => {
+    setRenameValue(engine.project?.meta.title ?? "");
+    setRenaming(true);
+    setTimeout(() => renameInputRef.current?.select(), 20);
+  };
+
+  const commitRename = async () => {
+    const t = renameValue.trim();
+    if (t && t !== engine.project?.meta.title) {
+      await engine.renameProject(t);
+    }
+    setRenaming(false);
+  };
 
   const openFromDisk = async () => {
-    try {
-      const result = await invoke<OpenedScore | null>("open_score_file");
-      if (result) {
-        await engine.loadFromXml(result.filename, result.musicxml);
+    if (isTauri()) {
+      try {
+        const result = await invoke<OpenedScore | null>("open_score_file");
+        if (result) await engine.loadFromXml(result.filename, result.musicxml);
+      } catch (err) {
+        console.error("open_score_file failed:", err);
       }
-    } catch (err) {
-      console.error("open_score_file failed:", err);
+    } else {
+      xmlInputRef.current?.click();
     }
+  };
+
+  const handleXmlFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = "";
+    const text = await file.text();
+    await engine.loadFromXml(file.name, text);
   };
 
   const closeProject = async () => {
     await engine.closeProject();
   };
 
-  const forgetRecent = async (path: string) => {
+  const deleteRecent = async (path: string) => {
     try {
-      await projectPersistence.recentForget(path);
-      await engine.refreshRecents();
+      await engine.deleteProject(path);
     } catch (err) {
-      console.error("recent_forget failed:", err);
+      console.error("deleteProject failed:", err);
     }
+    setDeletingPath(null);
   };
 
   return (
     <aside className="w-60 shrink-0 overflow-y-auto border-r border-obsidian-700 bg-obsidian-800/40 px-3 py-4 text-xs">
+      <input
+        ref={xmlInputRef}
+        type="file"
+        accept=".xml,.musicxml"
+        className="sr-only"
+        onChange={(e) => void handleXmlFile(e)}
+      />
+
       <div className="mb-3 flex items-center justify-between">
         <h2 className="font-medium uppercase tracking-widest text-zinc-500">Project</h2>
         <div className="flex items-center gap-1">
           <IconButton
-            label="New project (⌘N)"
+            label={isTauri() ? "New project (⌘N)" : "New project"}
             onClick={onNewProject}
             icon={<Plus size={12} />}
+          />
+          <IconButton
+            label="Import audio / MIDI"
+            onClick={onOpenAudioImport}
+            icon={<Upload size={12} />}
           />
           <IconButton
             label="Open project folder (⌘O)"
@@ -85,11 +137,34 @@ export function ProjectTree({ onNewProject }: { onNewProject: () => void }) {
       <div className="mb-5 rounded-md border border-obsidian-700/60 bg-obsidian-900/40 p-3">
         {engine.project ? (
           <div className="space-y-2">
-            <div className="flex items-center gap-2 text-zinc-200">
-              <FileMusic size={12} className="text-neon-cyan" />
-              <span className="truncate text-[11px] font-medium">
-                {engine.project.meta.title}
-              </span>
+            <div className="flex items-center gap-1 text-zinc-200">
+              <FileMusic size={12} className="shrink-0 text-neon-cyan" />
+              {renaming ? (
+                <input
+                  ref={renameInputRef}
+                  value={renameValue}
+                  onChange={(e) => setRenameValue(e.target.value)}
+                  onBlur={() => void commitRename()}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") void commitRename();
+                    if (e.key === "Escape") setRenaming(false);
+                  }}
+                  className="min-w-0 flex-1 rounded border border-neon-cyan/40 bg-obsidian-900 px-1 py-0.5 text-[11px] text-zinc-100 focus:outline-none"
+                />
+              ) : (
+                <>
+                  <span className="min-w-0 flex-1 truncate text-[11px] font-medium">
+                    {engine.project.meta.title}
+                  </span>
+                  <button
+                    onClick={startRename}
+                    title="Rename project"
+                    className="shrink-0 rounded p-0.5 text-zinc-600 hover:text-zinc-300"
+                  >
+                    <Pencil size={10} />
+                  </button>
+                </>
+              )}
             </div>
             <p className="num text-[10px] text-zinc-500">
               {engine.project.meta.key_signature} · {engine.project.meta.time_signature}
@@ -172,10 +247,7 @@ export function ProjectTree({ onNewProject }: { onNewProject: () => void }) {
                   onClick={() => void engine.openProject(r.path)}
                   className="flex w-full items-start gap-2 rounded px-2 py-1.5 text-left transition-colors hover:bg-obsidian-700"
                 >
-                  <FileMusic
-                    size={11}
-                    className="mt-0.5 shrink-0 text-neon-cyan/80"
-                  />
+                  <FileMusic size={11} className="mt-0.5 shrink-0 text-neon-cyan/80" />
                   <div className="min-w-0">
                     <div className="truncate text-[11px] text-zinc-200">{r.title}</div>
                     <div className="truncate text-[9px] text-zinc-600">
@@ -183,13 +255,33 @@ export function ProjectTree({ onNewProject }: { onNewProject: () => void }) {
                     </div>
                   </div>
                 </button>
-                <button
-                  aria-label={`Forget ${r.title}`}
-                  onClick={() => void forgetRecent(r.path)}
-                  className="shrink-0 rounded p-1 text-zinc-600 transition-colors hover:bg-obsidian-700 hover:text-zinc-300"
-                >
-                  <Trash2 size={10} />
-                </button>
+                {deletingPath === r.path ? (
+                  <div className="flex shrink-0 items-center gap-0.5">
+                    <button
+                      title="Confirm delete"
+                      onClick={() => void deleteRecent(r.path)}
+                      className="rounded p-1 text-danger hover:bg-danger/10"
+                    >
+                      <Check size={10} />
+                    </button>
+                    <button
+                      title="Cancel"
+                      onClick={() => setDeletingPath(null)}
+                      className="rounded p-1 text-zinc-500 hover:text-zinc-300"
+                    >
+                      <X size={10} />
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    aria-label={`Delete ${r.title}`}
+                    title="Delete project"
+                    onClick={() => setDeletingPath(r.path)}
+                    className="shrink-0 rounded p-1 text-zinc-600 transition-colors hover:bg-obsidian-700 hover:text-danger"
+                  >
+                    <Trash2 size={10} />
+                  </button>
+                )}
               </li>
             ))}
           </ul>

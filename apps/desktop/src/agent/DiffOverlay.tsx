@@ -43,6 +43,8 @@ export function DiffOverlay(): React.ReactElement | null {
     setBusy(true);
     try {
       await engine.acceptPendingDiff();
+      // Auto-play so you hear the change immediately — no separate click needed.
+      if (engine.score) engine.play();
     } finally {
       setBusy(false);
     }

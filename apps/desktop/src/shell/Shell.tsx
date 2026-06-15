@@ -1,10 +1,15 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { DiffOverlay } from "../agent/DiffOverlay";
+import { GenerateScoreDialog } from "../agent/GenerateScoreDialog";
 import { useEditorKeyboard } from "../editor/useEditorKeyboard";
+import { useMidiRecorder } from "../lib/useMidiRecorder";
+import { AudioImportDialog } from "../editor/AudioImportDialog";
 import { ExportDialog } from "../export/ExportDialog";
+import { OrchestrationDialog } from "../editor/OrchestrationDialog";
 import { TransposeDialog } from "../editor/TransposeDialog";
 import { useScoreEngine } from "../lib/ScoreEngine";
+import { isTauri } from "../lib/tauri";
 import { useKeyboardShortcuts } from "../lib/useKeyboardShortcuts";
 import { NewProjectDialog } from "../project/NewProjectDialog";
 import { RecoveryBanner } from "../project/RecoveryBanner";
@@ -36,15 +41,40 @@ interface AppInfo {
  */
 export function Shell({ info }: { info: AppInfo }) {
   const engine = useScoreEngine();
+  const shellRef = useRef<HTMLDivElement>(null);
+  const xmlInputRef = useRef<HTMLInputElement>(null);
   const [newDialog, setNewDialog] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [transposeOpen, setTransposeOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [generateOpen, setGenerateOpen] = useState(false);
+  const [orchestrationOpen, setOrchestrationOpen] = useState(false);
+  const [audioImportOpen, setAudioImportOpen] = useState(false);
+
+  const openMusicXml = () => xmlInputRef.current?.click();
+
+  const handleXmlFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = "";
+    const text = await file.text();
+    await engine.loadFromXml(file.name, text);
+  };
+
+  // Ensure the shell div has focus on mount so keyboard shortcuts are captured.
+  // Without this, browser chrome retains focus and ⌘N / ⌘K go to the OS.
+  useEffect(() => {
+    shellRef.current?.focus();
+  }, []);
 
   useEditorKeyboard(Boolean(engine.project));
+  useMidiRecorder();
 
   useKeyboardShortcuts([
-    { key: "n", meta: true, handler: () => setNewDialog(true) },
+    // ⌘N is browser-reserved (opens new window) and cannot be intercepted by
+    // event.preventDefault() in a browser tab. It works fine in the native
+    // Tauri app where there is no browser chrome.
+    ...(isTauri() ? [{ key: "n", meta: true, handler: () => setNewDialog(true) }] : []),
     { key: "o", meta: true, handler: () => void engine.openProjectViaDialog() },
     {
       key: "s",
@@ -73,14 +103,38 @@ export function Shell({ info }: { info: AppInfo }) {
   ]);
 
   return (
-    <div className="flex h-full w-full flex-col bg-obsidian-900 text-zinc-100">
+    <div
+      ref={shellRef}
+      tabIndex={-1}
+      className="flex h-full w-full flex-col bg-obsidian-900 text-zinc-100 outline-none"
+    >
+      <input
+        ref={xmlInputRef}
+        type="file"
+        accept=".xml,.musicxml"
+        className="sr-only"
+        onChange={(e) => void handleXmlFile(e)}
+      />
       <NewProjectDialog open={newDialog} onClose={() => setNewDialog(false)} />
-      <TopBar info={info} />
+      <TopBar
+        info={info}
+        onNewProject={() => setNewDialog(true)}
+        onImportAudio={() => setAudioImportOpen(true)}
+        onOpenMusicXml={openMusicXml}
+        onExport={() => setExportOpen(true)}
+      />
       <RecoveryBanner />
       <div className="flex flex-1 min-h-0">
-        <ProjectTree onNewProject={() => setNewDialog(true)} />
+        <ProjectTree
+          onNewProject={() => setNewDialog(true)}
+          onOpenAudioImport={() => setAudioImportOpen(true)}
+        />
         <main className="flex flex-1 min-w-0 flex-col">
-          <ScorePane />
+          <ScorePane
+            onNewProject={() => setNewDialog(true)}
+            onImportAudio={() => setAudioImportOpen(true)}
+            onOpenMusicXml={openMusicXml}
+          />
           <BottomRail />
         </main>
         <RightRail />
@@ -88,12 +142,18 @@ export function Shell({ info }: { info: AppInfo }) {
       <DiffOverlay />
       <ExportDialog open={exportOpen} onClose={() => setExportOpen(false)} />
       <TransposeDialog open={transposeOpen} onClose={() => setTransposeOpen(false)} />
+      <GenerateScoreDialog open={generateOpen} onClose={() => setGenerateOpen(false)} />
+      <OrchestrationDialog open={orchestrationOpen} onClose={() => setOrchestrationOpen(false)} />
+      <AudioImportDialog open={audioImportOpen} onClose={() => setAudioImportOpen(false)} />
       <CommandPalette
         open={paletteOpen}
         onClose={() => setPaletteOpen(false)}
         onOpenNewProject={() => setNewDialog(true)}
         onOpenExport={() => setExportOpen(true)}
         onOpenTranspose={() => setTransposeOpen(true)}
+        onOpenGenerate={() => setGenerateOpen(true)}
+        onOpenOrchestration={() => setOrchestrationOpen(true)}
+        onOpenAudioImport={() => setAudioImportOpen(true)}
         onFocusTutor={() => {
           // Tutor tab lives inside RightRail; opening the palette command
           // simply scrolls focus to the right rail. Wiring an event bus

@@ -2,7 +2,13 @@ import { EditorStatusBar } from "../editor/EditorStatusBar";
 import { useScoreEngine } from "../lib/ScoreEngine";
 import { ScoreView } from "../notation/ScoreView";
 
-export function ScorePane() {
+interface ScorePaneProps {
+  onNewProject: () => void;
+  onImportAudio: () => void;
+  onOpenMusicXml: () => void;
+}
+
+export function ScorePane({ onNewProject, onImportAudio, onOpenMusicXml }: ScorePaneProps) {
   const engine = useScoreEngine();
   return (
     <section className="flex flex-1 min-h-0 flex-col bg-obsidian-900">
@@ -12,6 +18,9 @@ export function ScorePane() {
             musicxml={engine.score?.musicxml ?? null}
             positionSec={engine.positionSec}
             durationSec={engine.score?.extracted.duration_sec ?? 0}
+            onNewProject={onNewProject}
+            onImportAudio={onImportAudio}
+            onOpenMusicXml={onOpenMusicXml}
           />
         </div>
       </div>

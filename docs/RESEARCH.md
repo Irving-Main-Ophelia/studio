@@ -231,9 +231,8 @@
 |---|---|---|---|
 | **Rubber Band** | Excellent | Commercial / GPL | Industry-standard; commercial license $5k+ |
 | **zplane élastique** | Broadcast-grade | Commercial only | Higher cost; used by DAWs |
-| **librosa.effects.pitch_shift** | OK | BSD | Quick but transients smear |
 | **SoundTouchJS** | OK in browser | LGPL | Quick preview |
-| **signalsmith-stretch** | 50–100% faster than librosa | Open | Promising for in-browser |
+| **signalsmith-stretch** | Fast, open | Open | Promising for in-browser |
 
 **Decision:** Rubber Band (licensed) for final-quality renders; SoundTouchJS for instant previews in the browser.
 

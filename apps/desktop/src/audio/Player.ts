@@ -131,11 +131,9 @@ export class Player {
   async play(notes: NoteEvent[], totalDurationSec: number, fromSec = 0): Promise<void> {
     await this.preload();
     if (!this.piano || !this.context) return;
-    if (this.context.state === "suspended") {
-      await this.context.resume();
-    }
 
-    this.stop();
+    this.stop(); // clears prior playback; also suspends the AudioContext
+    await this.context.resume(); // always resume — stop() suspends it
     this.cachedNotes = notes;
     this.playDuration = totalDurationSec;
     this.offsetSec = Math.max(0, fromSec);
@@ -262,6 +260,9 @@ export class Player {
       this.rafHandle = null;
     }
     this.piano?.stop();
+    // Suspend the AudioContext so future-scheduled Web Audio nodes are silenced
+    // immediately. play() calls context.resume() before the next playback.
+    void this.context?.suspend();
     for (const node of this.scheduledClicks) {
       try {
         node.stop();

@@ -115,6 +115,10 @@ interface ScoreEngineValue {
   acceptPendingDiff: () => Promise<void>;
   rejectPendingDiff: () => void;
 
+  /* --- MIDI recording slice (M1.6) -------------------------------- */
+  recordMode: boolean;
+  setRecordMode: (active: boolean) => void;
+
   loadFromXml: (filename: string, musicxml: string) => Promise<void>;
   loadFromUrl: (url: string, filename?: string) => Promise<void>;
   play: () => void;
@@ -129,10 +133,13 @@ interface ScoreEngineValue {
 
   refreshRecents: () => Promise<void>;
   newProject: (spec: NewProjectSpec) => Promise<void>;
+  replaceScore: (filename: string, musicxml: string) => Promise<void>;
   openProject: (path: string) => Promise<void>;
   openProjectViaDialog: () => Promise<void>;
   closeProject: () => Promise<void>;
   saveProject: () => Promise<void>;
+  renameProject: (newTitle: string) => Promise<void>;
+  deleteProject: (path: string) => Promise<void>;
   acceptPendingRecovery: () => Promise<void>;
   discardPendingRecovery: () => void;
   undo: () => Promise<void>;
@@ -191,6 +198,7 @@ export function ScoreEngineProvider({ children }: { children: React.ReactNode })
   /* M1.4 — pending agent diff. Holds at most one diff at a time so the UI
    * never shows competing previews; the next tool call replaces it. */
   const [pendingDiff, setPendingDiff] = useState<ScoreDiff | null>(null);
+  const [recordMode, setRecordModeState] = useState(false);
 
   const [backendOnline, setBackendOnline] = useState<boolean | null>(null);
 
@@ -452,6 +460,35 @@ export function ScoreEngineProvider({ children }: { children: React.ReactNode })
     await persistProjectSave(project, score.musicxml, null);
   }, [project, score, persistProjectSave]);
 
+  const renameProject = useCallback(
+    async (newTitle: string) => {
+      if (!project) return;
+      await projectPersistence.renameProject(project.path, newTitle);
+      setProject((prev) =>
+        prev ? { ...prev, meta: { ...prev.meta, title: newTitle } } : null,
+      );
+      void refreshRecents();
+    },
+    [project, refreshRecents],
+  );
+
+  const deleteProject = useCallback(
+    async (path: string) => {
+      await projectPersistence.deleteProject(path);
+      if (project?.path === path) {
+        setProject(null);
+        setScore(null);
+        setIsDirty(false);
+        setLastSavedAt(null);
+        setPendingRecovery(null);
+        opLogRef.current = new OperationLogState();
+        setOpVersion((n) => n + 1);
+      }
+      void refreshRecents();
+    },
+    [project, refreshRecents],
+  );
+
   /* --------------------- 30 s autosave timer ------------------------ */
 
   useEffect(() => {
@@ -607,6 +644,23 @@ export function ScoreEngineProvider({ children }: { children: React.ReactNode })
       }
     },
     [ingestMusicXml, score, project, persistProjectSave],
+  );
+
+  const replaceScore = useCallback(
+    async (filename: string, musicxml: string) => {
+      if (!score) return;
+      const op = buildScoreReplaceOp(
+        {
+          previousMusicXml: score.musicxml,
+          nextMusicXml: musicxml,
+          reason: `Imported ${filename}`,
+          description: `Imported ${filename}`,
+        },
+        opLogRef.current.nextIndex,
+      );
+      await applyAndPersistOperation(musicxml, op);
+    },
+    [score, applyAndPersistOperation],
   );
 
   const transpose = useCallback(
@@ -1165,10 +1219,13 @@ export function ScoreEngineProvider({ children }: { children: React.ReactNode })
       resetChat,
       refreshRecents,
       newProject,
+      replaceScore,
       openProject,
       openProjectViaDialog,
       closeProject,
       saveProject,
+      renameProject,
+      deleteProject,
       acceptPendingRecovery,
       discardPendingRecovery,
       undo,
@@ -1196,6 +1253,8 @@ export function ScoreEngineProvider({ children }: { children: React.ReactNode })
       pendingDiff,
       acceptPendingDiff,
       rejectPendingDiff,
+      recordMode,
+      setRecordMode: setRecordModeState,
     }),
     [
       score,
@@ -1229,10 +1288,13 @@ export function ScoreEngineProvider({ children }: { children: React.ReactNode })
       resetChat,
       refreshRecents,
       newProject,
+      replaceScore,
       openProject,
       openProjectViaDialog,
       closeProject,
       saveProject,
+      renameProject,
+      deleteProject,
       acceptPendingRecovery,
       discardPendingRecovery,
       undo,
@@ -1264,6 +1326,7 @@ export function ScoreEngineProvider({ children }: { children: React.ReactNode })
       pendingDiff,
       acceptPendingDiff,
       rejectPendingDiff,
+      recordMode,
     ],
   );
 
