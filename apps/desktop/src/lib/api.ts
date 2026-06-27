@@ -134,6 +134,17 @@ export type Articulation = "staccato" | "accent" | "marcato" | "tenuto" | "ferma
 export type Dynamic = "ppp" | "pp" | "p" | "mp" | "mf" | "f" | "ff" | "fff";
 export type TieType = "start" | "stop" | "continue" | "none";
 
+export interface ListedNoteRow {
+  part_index: number;
+  measure_number: number;
+  beat_offset: number;
+  voice: number | null;
+  part_name: string;
+  pitch: string;
+  midi: number | null;
+  duration_quarters: number;
+}
+
 class ApiError extends Error {
   constructor(
     message: string,
@@ -243,6 +254,74 @@ export const api = {
 
   appendMeasure: (req: { musicxml: string; part_index: number }) =>
     post<AppendMeasureResult>("/score/edit/measure/append", req),
+
+  listScoreNotes: (musicxml: string) =>
+    post<{ notes: ListedNoteRow[] }>("/score/edit/notes/list", { musicxml }),
+
+  resolveScoreNote: (req: {
+    musicxml: string;
+    measure_number: number;
+    pitch: string;
+    beat_hint: number;
+  }) => post<ListedNoteRow>("/score/edit/note/resolve", req),
+
+  getNoteInfo: (req: {
+    musicxml: string;
+    part_index: number;
+    measure_number: number;
+    beat_offset: number;
+    voice?: number | null;
+  }) =>
+    post<{
+      part_index: number;
+      measure_number: number;
+      beat_offset: number;
+      voice: number | null;
+      part_name: string;
+      pitch: string | null;
+      midi: number | null;
+      duration_quarters: number;
+      articulations: string[];
+      is_rest: boolean;
+    }>("/score/edit/note/info", req),
+
+  changeNoteDuration: (req: {
+    musicxml: string;
+    part_index: number;
+    measure_number: number;
+    beat_offset: number;
+    duration_quarters: number;
+    voice?: number | null;
+  }) => post<{ musicxml: string }>("/score/edit/note/duration", req),
+
+  respellNote: (req: {
+    musicxml: string;
+    part_index: number;
+    measure_number: number;
+    beat_offset: number;
+    voice?: number | null;
+  }) => post<{ musicxml: string; pitch: string }>("/score/edit/note/respell", req),
+
+  changeNotePitch: (req: {
+    musicxml: string;
+    part_index: number;
+    measure_number: number;
+    beat_offset: number;
+    pitch: string;
+    voice?: number | null;
+  }) => post<{ musicxml: string; pitch: string }>("/score/edit/note/pitch", req),
+
+  transposeNoteSemitones: (req: {
+    musicxml: string;
+    part_index: number;
+    measure_number: number;
+    beat_offset: number;
+    semitones: number;
+    voice?: number | null;
+  }) => post<{ musicxml: string; pitch: string }>("/score/edit/note/transpose-semitones", req),
+
+  setKeySignature: (req: { musicxml: string; tonic: string; mode: string }) =>
+    post<{ musicxml: string; key: string }>("/score/edit/key-signature/set", req),
 
   /* --------------------- theory analyzers (M1.3) --------------------- */
   progression: (musicxml: string) =>

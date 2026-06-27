@@ -11,6 +11,7 @@
   },
   "scripts": {
     "dev": "pnpm --filter @stockhausen/desktop dev",
+    "dev:stack": "sh -c 'trap \"kill 0\" INT TERM EXIT; pnpm backend:dev & pnpm dev & wait'",
     "build": "pnpm --filter @stockhausen/desktop build",
     "tauri:dev": "pnpm --filter @stockhausen/desktop tauri dev",
     "tauri:build": "pnpm --filter @stockhausen/desktop tauri build",

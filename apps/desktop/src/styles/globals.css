@@ -72,11 +72,10 @@
     border: 1px solid var(--glass-border);
   }
 
-  /* Vertical fader: rotated range input with neon-cyan track + magenta thumb. */
-  .strip-fader {
-    -webkit-appearance: slider-vertical;
-    appearance: slider-vertical;
-    writing-mode: bt-lr;
+  /* Vertical fader — writing-mode per current HTML spec (not appearance: slider-vertical). */
+  input[type="range"].strip-fader {
+    writing-mode: vertical-lr;
+    direction: rtl;
     width: 4px;
     background: linear-gradient(
       to top,

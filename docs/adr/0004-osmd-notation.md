@@ -28,7 +28,8 @@ Stockhausen needs a notation engine that:
 
 ## Consequences
 
-- Live editing works against the OSMD `MusicSheet` tree, then we re-render.
+- **Display only in Stockhausen:** OSMD renders MusicXML to SVG. Edits mutate MusicXML via the local FastAPI + music21 layer, then OSMD reloads. See **ADR-0015** (supersedes the earlier assumption below).
+- ~~Live editing works against the OSMD `MusicSheet` tree, then we re-render.~~ **Superseded by ADR-0015.**
 - Verovio joins the stack in Phase 1 for publication-quality PDFs.
 - OSMD's cursor API (`osmd.cursor`) is the integration point for playback sync in Phase 1.
 - We avoid OSMD's built-in `PlaybackManager` for now — we want the audio engine on the Rust/JS side under our control. The backend's `/score/notes` endpoint extracts a flat event list using `music21`, which we feed to `smplr`. This separation buys us simpler code in Phase 0 and a clean swap to sfizz.wasm in Phase 1.

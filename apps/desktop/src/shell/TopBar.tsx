@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 
 import { TransposeDialog } from "../editor/TransposeDialog";
+import { EditorSettingsPanel } from "../editor/EditorSettingsPanel";
 import { useScoreEngine } from "../lib/ScoreEngine";
 import { NorthStar } from "./NorthStar";
 
@@ -57,6 +58,7 @@ export function TopBar({ info, onNewProject, onImportAudio, onOpenMusicXml, onEx
   const [showTranspose, setShowTranspose] = useState(false);
   const [showAdvancedTranspose, setShowAdvancedTranspose] = useState(false);
   const [showFileMenu, setShowFileMenu] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const fileMenuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -208,12 +210,38 @@ export function TopBar({ info, onNewProject, onImportAudio, onOpenMusicXml, onEx
           Transpose
         </button>
         <button
+          type="button"
+          disabled={!engine.selection.measureRange}
+          title={
+            engine.selection.measureRange
+              ? "Capture: replace selected measures with live guitar/MIDI input"
+              : "Select measures first (Shift+drag on score)"
+          }
+          onClick={() => engine.setCaptureMode(!engine.captureMode)}
+          className={[
+            "rounded-md px-2 py-1 text-xs transition-colors duration-150 ease-signature disabled:opacity-30",
+            engine.captureMode
+              ? "bg-neon-magenta/20 text-neon-magenta"
+              : "text-zinc-400 hover:bg-obsidian-700 hover:text-zinc-100",
+          ].join(" ")}
+        >
+          Capture
+        </button>
+        <button
+          type="button"
+          onClick={() => setShowSettings(true)}
           className="rounded-md p-1.5 text-zinc-400 transition-colors duration-150 ease-signature hover:bg-obsidian-700 hover:text-zinc-100"
           aria-label="Settings"
         >
           <Settings size={14} />
         </button>
       </div>
+
+      <EditorSettingsPanel
+        open={showSettings}
+        onClose={() => setShowSettings(false)}
+        onChange={engine.setEditorPreferences}
+      />
 
       {/* Transpose dropdown */}
       {showTranspose && (

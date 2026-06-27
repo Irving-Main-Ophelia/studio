@@ -93,7 +93,21 @@ Project {
 - **Stockhausen JSON sidecar** for everything MusicXML can't represent: mixer state, automation curves, multi-take captures, agent annotations, version pointers, motivic graph annotations.
 - **OperationLog** is event-sourced. Every change is an event with an inverse. This is how undo, redo, agent-action review, and (eventually) collaboration work.
 
-## Latency Path (the live guitar pipeline)
+### Notation edit pipeline (Phase 1 — ADR-0015)
+
+OSMD renders MusicXML to SVG for display. **Edits do not mutate the SVG or OSMD's internal tree.** Flow:
+
+```
+Pointer on staff (EditLayer)
+  → hit-test (osmdHitTest / osmdAnnotate)
+  → resolve coordinates (noteResolve + POST /score/edit/note/resolve)
+  → POST /score/edit/* (music21 mutates MusicXML)
+  → ScoreEngine.applyEditOp commits new musicxml string
+  → ScoreView: osmd.clear() → load(xml) → render()
+```
+
+Playback note extraction (`POST /score/notes`) runs in the background and must not roll back a successful edit.
+
 
 This is the hardest constraint in the system. We budget **≤ 17 ms** from string-pluck to a new note appearing on the staff.
 
@@ -117,7 +131,7 @@ This is the hardest constraint in the system. We budget **≤ 17 ms** from strin
    │ ~1 ms
    ▼
 [Notation incremental renderer (OSMD diff)]
-   │ ~7 ms (SVG patch)
+   │ ~7 ms (SVG patch)   ← Phase 2 live capture; Phase 1 imported edits use full reload per ADR-0015
    ▼
 [Visible on screen]
 ```

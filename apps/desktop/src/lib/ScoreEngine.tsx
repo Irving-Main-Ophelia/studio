@@ -21,6 +21,16 @@ import type { MixerSnapshot } from "../audio/Mixer";
 import { Player, type LoopRegion, type PlayerStatus } from "../audio/Player";
 import type { EditorState } from "../editor/EditorState";
 import {
+  type EditorPreferences,
+  loadEditorPreferences,
+} from "../editor/EditorPreferences";
+import {
+  initialSelectionState,
+  type MeasureRange,
+  type SelectedNote,
+  type SelectionState,
+} from "../editor/SelectionState";
+import {
   advanceCursor,
   bumpOctave,
   clearPendingTie,
@@ -56,10 +66,13 @@ import {
   type Dynamic,
   type ExtractedScore,
   type KeyEstimate,
+  type ListedNoteRow,
   type ScoreDiff,
   type TieType,
   type ToolCallRecord,
 } from "./api";
+import { logEngineFailure, userFacingEditMessage } from "./engineLog";
+import { resolveNoteForEdit } from "../notation/noteResolve";
 
 export interface LoadedScore {
   filename: string;
@@ -118,6 +131,23 @@ interface ScoreEngineValue {
   /* --- MIDI recording slice (M1.6) -------------------------------- */
   recordMode: boolean;
   setRecordMode: (active: boolean) => void;
+
+  /* --- EditLayer slice (M1.7) ------------------------------------- */
+  selection: SelectionState;
+  editorPreferences: EditorPreferences;
+  captureMode: boolean;
+  setCaptureMode: (active: boolean) => void;
+  selectNote: (note: SelectedNote | null) => void;
+  setMeasureRange: (range: MeasureRange | null) => void;
+  setEditorPreferences: (prefs: EditorPreferences) => void;
+  editNoteDuration: (note: SelectedNote, duration_quarters: number) => Promise<void>;
+  editNoteArticulation: (note: SelectedNote, articulation: Articulation) => Promise<void>;
+  editNoteDynamic: (note: SelectedNote, dynamic: Dynamic) => Promise<void>;
+  editNoteRespell: (note: SelectedNote) => Promise<void>;
+  editNotePitch: (note: SelectedNote, pitch: string) => Promise<void>;
+  transposeNote: (note: SelectedNote, semitones: number) => Promise<void>;
+  removeNoteAt: (note: SelectedNote) => Promise<void>;
+  applyDetectedKey: (tonic: string, mode: string) => Promise<void>;
 
   loadFromXml: (filename: string, musicxml: string) => Promise<void>;
   loadFromUrl: (url: string, filename?: string) => Promise<void>;
@@ -199,6 +229,11 @@ export function ScoreEngineProvider({ children }: { children: React.ReactNode })
    * never shows competing previews; the next tool call replaces it. */
   const [pendingDiff, setPendingDiff] = useState<ScoreDiff | null>(null);
   const [recordMode, setRecordModeState] = useState(false);
+  const [selection, setSelection] = useState<SelectionState>(initialSelectionState);
+  const [editorPreferences, setEditorPreferencesState] = useState<EditorPreferences>(
+    () => loadEditorPreferences(),
+  );
+  const [captureMode, setCaptureModeState] = useState(false);
 
   const [backendOnline, setBackendOnline] = useState<boolean | null>(null);
 
@@ -230,6 +265,58 @@ export function ScoreEngineProvider({ children }: { children: React.ReactNode })
 
   const playerRef = useRef<Player | null>(null);
   const opLogRef = useRef<OperationLogState>(new OperationLogState());
+  const scoreRef = useRef<LoadedScore | null>(null);
+  const scoreNotesRef = useRef<ListedNoteRow[]>([]);
+  const [scoreNotes, setScoreNotes] = useState<ListedNoteRow[]>([]);
+
+  useEffect(() => {
+    scoreRef.current = score;
+  }, [score]);
+
+  useEffect(() => {
+    scoreNotesRef.current = scoreNotes;
+  }, [scoreNotes]);
+
+  const refreshNoteIndex = useCallback((musicxml: string) => {
+    void api
+      .listScoreNotes(musicxml)
+      .then((res) => setScoreNotes(res.notes))
+      .catch((err) => logEngineFailure("edit", err));
+  }, []);
+
+  useEffect(() => {
+    if (!score?.musicxml) {
+      setScoreNotes([]);
+      return;
+    }
+    refreshNoteIndex(score.musicxml);
+  }, [score?.musicxml, refreshNoteIndex]);
+
+  const resolveNoteForApi = useCallback(async (note: SelectedNote): Promise<SelectedNote> => {
+    const local = resolveNoteForEdit(note, scoreNotesRef.current);
+    const current = scoreRef.current;
+    if (!current) return local;
+    try {
+      const row = await api.resolveScoreNote({
+        musicxml: current.musicxml,
+        measure_number: local.measure_number,
+        pitch: local.pitch,
+        beat_hint: local.beat_offset,
+      });
+      return {
+        part_index: row.part_index,
+        measure_number: row.measure_number,
+        beat_offset: row.beat_offset,
+        voice: row.voice,
+        pitch: row.pitch,
+        duration_quarters: row.duration_quarters,
+        part_name: row.part_name,
+        midi: row.midi,
+      };
+    } catch {
+      return local;
+    }
+  }, []);
 
   useEffect(() => {
     const player = new Player({
@@ -345,9 +432,9 @@ export function ScoreEngineProvider({ children }: { children: React.ReactNode })
         setIsDirty(false);
         return next;
       } catch (err) {
-        const msg = err instanceof ApiError ? err.message : String(err);
-        setSaveError(msg);
-        throw err;
+        logEngineFailure("save", err);
+        setIsDirty(true);
+        return handle;
       } finally {
         setSaving(false);
       }
@@ -838,19 +925,42 @@ export function ScoreEngineProvider({ children }: { children: React.ReactNode })
       nextMusicXml: string,
       description: string,
     ) => {
-      if (!score) return;
+      const current = scoreRef.current;
+      if (!current) return;
+      const previousMusicXml = current.musicxml;
+      const filename = current.filename;
       const op = buildScoreReplaceOp(
         {
-          previousMusicXml: score.musicxml,
+          previousMusicXml,
           nextMusicXml,
           reason: description,
           description,
         },
         opLogRef.current.nextIndex,
       );
-      await applyAndPersistOperation(nextMusicXml, op);
+
+      setScore((prev) => (prev ? { ...prev, musicxml: nextMusicXml } : prev));
+      opLogRef.current.append(op);
+      setOpVersion((n) => n + 1);
+      refreshNoteIndex(nextMusicXml);
+
+      if (project) {
+        try {
+          await persistProjectSave(project, nextMusicXml, op);
+        } catch {
+          setIsDirty(true);
+        }
+      }
+
+      void ingestMusicXml(filename, nextMusicXml)
+        .then((derived) => {
+          setScore(derived);
+        })
+        .catch((err) => {
+          logEngineFailure("edit", err);
+        });
     },
-    [score, applyAndPersistOperation],
+    [ingestMusicXml, project, persistProjectSave, refreshNoteIndex],
   );
 
   const insertNoteAtCursor = useCallback(
@@ -880,7 +990,7 @@ export function ScoreEngineProvider({ children }: { children: React.ReactNode })
           };
         });
       } catch (err) {
-        setEditorError(err instanceof ApiError ? err.message : String(err));
+        setEditorError(userFacingEditMessage(err));
       } finally {
         setEditorBusy(false);
       }
@@ -903,7 +1013,7 @@ export function ScoreEngineProvider({ children }: { children: React.ReactNode })
         await applyEditOp(result.musicxml, `Insert rest (${duration_quarters}q)`);
         setEditor((s) => ({ ...s, cursor: result.next_cursor, pending_tie: false }));
       } catch (err) {
-        setEditorError(err instanceof ApiError ? err.message : String(err));
+        setEditorError(userFacingEditMessage(err));
       } finally {
         setEditorBusy(false);
       }
@@ -931,7 +1041,7 @@ export function ScoreEngineProvider({ children }: { children: React.ReactNode })
           `${result.action === "added" ? "Add" : "Remove"} ${articulation}`,
         );
       } catch (err) {
-        setEditorError(err instanceof ApiError ? err.message : String(err));
+        setEditorError(userFacingEditMessage(err));
       } finally {
         setEditorBusy(false);
       }
@@ -955,7 +1065,7 @@ export function ScoreEngineProvider({ children }: { children: React.ReactNode })
       await applyEditOp(result.musicxml, "Tie to next");
       setEditor((s) => setPendingTie(s));
     } catch (err) {
-      setEditorError(err instanceof ApiError ? err.message : String(err));
+      setEditorError(userFacingEditMessage(err));
     } finally {
       setEditorBusy(false);
     }
@@ -976,7 +1086,7 @@ export function ScoreEngineProvider({ children }: { children: React.ReactNode })
         });
         await applyEditOp(result.musicxml, `Dynamic ${dynamic}`);
       } catch (err) {
-        setEditorError(err instanceof ApiError ? err.message : String(err));
+        setEditorError(userFacingEditMessage(err));
       } finally {
         setEditorBusy(false);
       }
@@ -995,7 +1105,7 @@ export function ScoreEngineProvider({ children }: { children: React.ReactNode })
       });
       await applyEditOp(result.musicxml, `Append measure ${result.new_measure_number}`);
     } catch (err) {
-      setEditorError(err instanceof ApiError ? err.message : String(err));
+      setEditorError(userFacingEditMessage(err));
     } finally {
       setEditorBusy(false);
     }
@@ -1016,11 +1126,247 @@ export function ScoreEngineProvider({ children }: { children: React.ReactNode })
       await applyEditOp(result.musicxml, "Remove note");
       setEditor((s) => clearPendingTie({ ...s, last_inserted: null }));
     } catch (err) {
-      setEditorError(err instanceof ApiError ? err.message : String(err));
+      setEditorError(userFacingEditMessage(err));
     } finally {
       setEditorBusy(false);
     }
   }, [score, editor, applyEditOp]);
+
+  const cursorFromNote = (note: SelectedNote) => ({
+    part_index: note.part_index,
+    measure_number: note.measure_number,
+    beat_offset: note.beat_offset,
+    voice: note.voice,
+  });
+
+  const syncEditorCursor = useCallback((note: SelectedNote) => {
+    setEditor((s) => ({
+      ...s,
+      cursor: cursorFromNote(note),
+      last_inserted: cursorFromNote(note),
+      duration_quarters: note.duration_quarters,
+    }));
+  }, []);
+
+  const selectNote = useCallback(
+    (note: SelectedNote | null) => {
+      setSelection((s) => ({ ...s, note }));
+      if (note) syncEditorCursor(note);
+    },
+    [syncEditorCursor],
+  );
+
+  const setMeasureRange = useCallback((range: MeasureRange | null) => {
+    setSelection((s) => ({ ...s, measureRange: range }));
+  }, []);
+
+  const setEditorPreferences = useCallback((prefs: EditorPreferences) => {
+    setEditorPreferencesState(prefs);
+  }, []);
+
+  const setCaptureMode = useCallback((active: boolean) => {
+    setCaptureModeState(active);
+    if (active) setRecordModeState(true);
+  }, []);
+
+  const editNoteDuration = useCallback(
+    async (note: SelectedNote, duration_quarters: number) => {
+      const current = scoreRef.current;
+      if (!current) return;
+      setEditorBusy(true);
+      setEditorError(null);
+      try {
+        const target = await resolveNoteForApi(note);
+        const result = await api.changeNoteDuration({
+          musicxml: current.musicxml,
+          ...cursorFromNote(target),
+          duration_quarters,
+        });
+        await applyEditOp(result.musicxml, `Duration → ${duration_quarters}q`);
+        selectNote({ ...target, duration_quarters });
+      } catch (err) {
+        setEditorError(userFacingEditMessage(err));
+      } finally {
+        setEditorBusy(false);
+      }
+    },
+    [applyEditOp, selectNote, resolveNoteForApi],
+  );
+
+  const editNoteArticulation = useCallback(
+    async (note: SelectedNote, articulation: Articulation) => {
+      const current = scoreRef.current;
+      if (!current) return;
+      setEditorBusy(true);
+      setEditorError(null);
+      try {
+        const target = await resolveNoteForApi(note);
+        const result = await api.toggleArticulation({
+          musicxml: current.musicxml,
+          ...cursorFromNote(target),
+          articulation,
+        });
+        await applyEditOp(
+          result.musicxml,
+          `${result.action === "added" ? "Add" : "Remove"} ${articulation}`,
+        );
+      } catch (err) {
+        setEditorError(userFacingEditMessage(err));
+      } finally {
+        setEditorBusy(false);
+      }
+    },
+    [applyEditOp, resolveNoteForApi],
+  );
+
+  const editNoteDynamic = useCallback(
+    async (note: SelectedNote, dynamic: Dynamic) => {
+      const current = scoreRef.current;
+      if (!current) return;
+      setEditorBusy(true);
+      setEditorError(null);
+      try {
+        const target = await resolveNoteForApi(note);
+        const result = await api.setDynamic({
+          musicxml: current.musicxml,
+          part_index: target.part_index,
+          measure_number: target.measure_number,
+          beat_offset: target.beat_offset,
+          dynamic,
+        });
+        await applyEditOp(result.musicxml, `Dynamic ${dynamic}`);
+      } catch (err) {
+        setEditorError(userFacingEditMessage(err));
+      } finally {
+        setEditorBusy(false);
+      }
+    },
+    [applyEditOp, resolveNoteForApi],
+  );
+
+  const editNoteRespell = useCallback(
+    async (note: SelectedNote) => {
+      const current = scoreRef.current;
+      if (!current) return;
+      setEditorBusy(true);
+      setEditorError(null);
+      try {
+        const target = await resolveNoteForApi(note);
+        const result = await api.respellNote({
+          musicxml: current.musicxml,
+          ...cursorFromNote(target),
+        });
+        await applyEditOp(result.musicxml, `Respell → ${result.pitch}`);
+        selectNote({ ...target, pitch: result.pitch });
+      } catch (err) {
+        setEditorError(userFacingEditMessage(err));
+      } finally {
+        setEditorBusy(false);
+      }
+    },
+    [applyEditOp, selectNote, resolveNoteForApi],
+  );
+
+  const editNotePitch = useCallback(
+    async (note: SelectedNote, pitch: string) => {
+      const current = scoreRef.current;
+      if (!current) return;
+      setEditorBusy(true);
+      setEditorError(null);
+      try {
+        const target = await resolveNoteForApi(note);
+        const result = await api.changeNotePitch({
+          musicxml: current.musicxml,
+          ...cursorFromNote(target),
+          pitch,
+        });
+        await applyEditOp(result.musicxml, `Pitch → ${result.pitch}`);
+        selectNote({ ...target, pitch: result.pitch });
+      } catch (err) {
+        setEditorError(userFacingEditMessage(err));
+      } finally {
+        setEditorBusy(false);
+      }
+    },
+    [applyEditOp, selectNote, resolveNoteForApi],
+  );
+
+  const transposeNote = useCallback(
+    async (note: SelectedNote, semitones: number) => {
+      const current = scoreRef.current;
+      if (!current) return;
+      setEditorBusy(true);
+      setEditorError(null);
+      try {
+        const target = await resolveNoteForApi(note);
+        const result = await api.transposeNoteSemitones({
+          musicxml: current.musicxml,
+          ...cursorFromNote(target),
+          semitones,
+        });
+        await applyEditOp(
+          result.musicxml,
+          `Transpose ${semitones > 0 ? "+" : ""}${semitones} st → ${result.pitch}`,
+        );
+        selectNote({ ...target, pitch: result.pitch });
+      } catch (err) {
+        setEditorError(userFacingEditMessage(err));
+      } finally {
+        setEditorBusy(false);
+      }
+    },
+    [applyEditOp, selectNote, resolveNoteForApi],
+  );
+
+  const removeNoteAt = useCallback(
+    async (note: SelectedNote) => {
+      const current = scoreRef.current;
+      if (!current) return;
+      setEditorBusy(true);
+      setEditorError(null);
+      try {
+        const target = await resolveNoteForApi(note);
+        const result = await api.removeNote({
+          musicxml: current.musicxml,
+          ...cursorFromNote(target),
+        });
+        await applyEditOp(result.musicxml, "Remove note");
+        selectNote(null);
+      } catch (err) {
+        setEditorError(userFacingEditMessage(err));
+      } finally {
+        setEditorBusy(false);
+      }
+    },
+    [applyEditOp, selectNote, resolveNoteForApi],
+  );
+
+  const applyDetectedKey = useCallback(
+    async (tonic: string, mode: string) => {
+      if (!score) return;
+      setEditorBusy(true);
+      setEditorError(null);
+      try {
+        const result = await api.setKeySignature({
+          musicxml: score.musicxml,
+          tonic,
+          mode,
+        });
+        await applyEditOp(result.musicxml, `Key signature → ${result.key}`);
+        if (project) {
+          setProject({
+            ...project,
+            meta: { ...project.meta, key_signature: result.key },
+          });
+        }
+      } catch (err) {
+        setEditorError(userFacingEditMessage(err));
+      } finally {
+        setEditorBusy(false);
+      }
+    },
+    [score, project, applyEditOp],
+  );
 
   const moveCursorBy = useCallback((delta_beats: number) => {
     setEditor((s) => moveCursor(s, delta_beats));
@@ -1255,6 +1601,21 @@ export function ScoreEngineProvider({ children }: { children: React.ReactNode })
       rejectPendingDiff,
       recordMode,
       setRecordMode: setRecordModeState,
+      selection,
+      editorPreferences,
+      captureMode,
+      setCaptureMode,
+      selectNote,
+      setMeasureRange,
+      setEditorPreferences,
+      editNoteDuration,
+      editNoteArticulation,
+      editNoteDynamic,
+      editNoteRespell,
+      editNotePitch,
+      transposeNote,
+      removeNoteAt,
+      applyDetectedKey,
     }),
     [
       score,
@@ -1327,6 +1688,21 @@ export function ScoreEngineProvider({ children }: { children: React.ReactNode })
       acceptPendingDiff,
       rejectPendingDiff,
       recordMode,
+      selection,
+      editorPreferences,
+      captureMode,
+      selectNote,
+      setMeasureRange,
+      setEditorPreferences,
+      setCaptureMode,
+      editNoteDuration,
+      editNoteArticulation,
+      editNoteDynamic,
+      editNoteRespell,
+      editNotePitch,
+      transposeNote,
+      removeNoteAt,
+      applyDetectedKey,
     ],
   );
 

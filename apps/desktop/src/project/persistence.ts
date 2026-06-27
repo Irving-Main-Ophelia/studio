@@ -1,8 +1,8 @@
 /**
  * Thin Tauri-IPC wrappers for the Rust `persistence::*` commands.
  *
- * In browser mode (dev server without Tauri), falls back to a localStorage
- * shim so that New Project, Open, Save, and Recents all work normally.
+ * In browser mode (dev server without Tauri), projects live in IndexedDB
+ * (large MusicXML). Recents list stays in localStorage.
  */
 
 import { invoke } from "@tauri-apps/api/core";
@@ -16,8 +16,13 @@ import {
   type SaveRequest,
   type SaveResult,
 } from "./types";
+import {
+  deleteBrowserProject,
+  getBrowserProject,
+  putBrowserProject,
+} from "./browserProjectStore";
 
-// ─── browser-mode localStorage shim ─────────────────────────────────────────
+// ─── browser-mode IndexedDB shim ────────────────────────────────────────────
 
 const RECENTS_KEY = "stockhausen:recents";
 
@@ -35,44 +40,29 @@ function _addRecent(r: RecentProject) {
   localStorage.setItem(RECENTS_KEY, JSON.stringify(list.slice(0, 20)));
 }
 
-function _getProject(path: string): ProjectHandle | null {
-  try {
-    const raw = localStorage.getItem(`stockhausen:project:${path}`);
-    return raw ? (JSON.parse(raw) as ProjectHandle) : null;
-  } catch {
-    return null;
-  }
-}
-
-function _putProject(handle: ProjectHandle) {
-  localStorage.setItem(`stockhausen:project:${handle.path}`, JSON.stringify(handle));
-}
-
 const browserPersistence = {
   defaultRoot: (): Promise<string> => Promise.resolve("browser://projects"),
 
-  renameProject: (path: string, newTitle: string): Promise<void> => {
-    const handle = _getProject(path);
-    if (!handle) return Promise.reject(new Error(`Project not found: ${path}`));
+  renameProject: async (path: string, newTitle: string): Promise<void> => {
+    const handle = await getBrowserProject(path);
+    if (!handle) throw new Error(`Project not found: ${path}`);
     const updated: ProjectHandle = { ...handle, meta: { ...handle.meta, title: newTitle } };
-    _putProject(updated);
+    await putBrowserProject(updated);
     const list = _getRecents().map((r) =>
       r.path === path ? { ...r, title: newTitle } : r,
     );
     localStorage.setItem(RECENTS_KEY, JSON.stringify(list));
-    return Promise.resolve();
   },
 
-  deleteProject: (path: string): Promise<void> => {
-    localStorage.removeItem(`stockhausen:project:${path}`);
+  deleteProject: async (path: string): Promise<void> => {
+    await deleteBrowserProject(path);
     localStorage.setItem(
       RECENTS_KEY,
       JSON.stringify(_getRecents().filter((r) => r.path !== path)),
     );
-    return Promise.resolve();
   },
 
-  newProject: (spec: NewProjectSpec): Promise<ProjectHandle> => {
+  newProject: async (spec: NewProjectSpec): Promise<ProjectHandle> => {
     const now = new Date().toISOString();
     const id =
       typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
@@ -101,23 +91,23 @@ const browserPersistence = {
       operations: [spec.initial_operation],
       pending_operations: [],
     };
-    _putProject(handle);
+    await putBrowserProject(handle);
     _addRecent({ path, title: spec.title, last_opened: now });
-    return Promise.resolve(handle);
+    return handle;
   },
 
-  openProject: (path: string): Promise<ProjectHandle> => {
-    const handle = _getProject(path);
-    if (!handle) return Promise.reject(new Error(`Project not found: ${path}`));
+  openProject: async (path: string): Promise<ProjectHandle> => {
+    const handle = await getBrowserProject(path);
+    if (!handle) throw new Error(`Project not found: ${path}`);
     _addRecent({ path, title: handle.meta.title, last_opened: new Date().toISOString() });
-    return Promise.resolve(handle);
+    return handle;
   },
 
   openDialog: (): Promise<string | null> => Promise.resolve(null),
 
-  save: (req: SaveRequest): Promise<SaveResult> => {
+  save: async (req: SaveRequest): Promise<SaveResult> => {
     const now = new Date().toISOString();
-    const existing = _getProject(req.path);
+    const existing = await getBrowserProject(req.path);
     const ops = existing?.operations ?? [];
     const updated: ProjectHandle = {
       path: req.path,
@@ -126,8 +116,8 @@ const browserPersistence = {
       operations: req.operation ? [...ops, req.operation] : ops,
       pending_operations: [],
     };
-    _putProject(updated);
-    return Promise.resolve({ updated_at: now, last_op_index: req.meta.last_op_index });
+    await putBrowserProject(updated);
+    return { updated_at: now, last_op_index: req.meta.last_op_index };
   },
 
   close: (_path: string): Promise<void> => Promise.resolve(),
@@ -156,7 +146,6 @@ const tauriPersistence = {
   close: (path: string) => invoke<void>("project_close", { path }),
   recentList: () => invoke<RecentProject[]>("project_recent_list"),
   recentForget: (path: string) => invoke<void>("project_recent_forget", { path }),
-  // TODO: wire to Rust commands when added
   renameProject: (_path: string, _newTitle: string): Promise<void> =>
     Promise.resolve(),
   deleteProject: (_path: string): Promise<void> => Promise.resolve(),

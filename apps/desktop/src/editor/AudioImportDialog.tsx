@@ -12,8 +12,10 @@
 import { AlertTriangle, CheckCircle2, FileMusic, Music, Music2, Upload } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
-import { BACKEND_URL, api } from "../lib/api";
+import { BACKEND_URL, api, type KeyEstimate } from "../lib/api";
 import { useScoreEngine } from "../lib/ScoreEngine";
+import { loadEditorPreferences } from "./EditorPreferences";
+import { KeySuggestionDialog } from "./KeySuggestionDialog";
 import { buildScoreInitOp } from "../project/OperationLog";
 import type { NewProjectSpec } from "../project/types";
 
@@ -67,6 +69,10 @@ export function AudioImportDialog({
   const [importing, setImporting] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
   const [importDone, setImportDone] = useState(false);
+  const [pendingKey, setPendingKey] = useState<KeyEstimate | null>(null);
+  const [pendingMusicXml, setPendingMusicXml] = useState<string | null>(null);
+  const [pendingTitle, setPendingTitle] = useState<string>("");
+  const [keyBusy, setKeyBusy] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -105,6 +111,65 @@ export function AudioImportDialog({
       if (file.name.match(/\.(mid|midi)$/i)) setMode("midi");
       else setMode("audio");
     }
+  }
+
+  async function finalizeImport(
+    title: string,
+    musicxml: string,
+    keyEst: KeyEstimate | null,
+    applyKey = false,
+  ) {
+    let finalXml = musicxml;
+    if (applyKey && keyEst) {
+      const applied = await api.setKeySignature({
+        musicxml,
+        tonic: keyEst.key,
+        mode: keyEst.mode || "major",
+      });
+      finalXml = applied.musicxml;
+    }
+
+    if (engine.project) {
+      await engine.replaceScore(title, finalXml);
+    } else {
+      let tempo_bpm = 120;
+      let key_signature = "C major";
+      const time_signature = _extractTimeSig(finalXml);
+      try {
+        const extracted = await api.extractNotes(finalXml);
+        tempo_bpm = extracted.tempo_bpm || 120;
+        if (keyEst?.key) key_signature = `${keyEst.key} ${keyEst.mode ?? ""}`.trim();
+        else {
+          const k = await api.analyzeKey(finalXml).catch(() => null);
+          if (k?.key) key_signature = `${k.key} ${k.mode ?? ""}`.trim();
+        }
+      } catch {
+        // non-fatal
+      }
+      const initialOp = buildScoreInitOp({
+        musicxml: finalXml,
+        title,
+        composer: "",
+        tempo_bpm,
+        time_signature,
+        key_signature,
+      });
+      const spec: NewProjectSpec = {
+        title,
+        composer: "",
+        tempo_bpm,
+        time_signature,
+        key_signature,
+        instrumentation: [{ id: "guitar", instrument: "Classical Guitar", channel: 0 }],
+        initial_musicxml: finalXml,
+        initial_operation: initialOp,
+      };
+      await engine.newProject(spec);
+    }
+    setImportDone(true);
+    setPendingKey(null);
+    setPendingMusicXml(null);
+    setTimeout(onClose, 1200);
   }
 
   async function handleImport() {
@@ -149,51 +214,50 @@ export function AudioImportDialog({
 
       const title = selectedFile.name.replace(/\.[^.]+$/, "");
 
-      if (engine.project) {
-        // Project already open → replace its score with the imported content.
-        // This persists as an operation so nothing is lost on hot-reload.
-        await engine.replaceScore(title, musicxml);
-      } else {
-        // No project yet → create one from the imported file.
-        let tempo_bpm = 120;
-        let key_signature = "C major";
-        const time_signature = _extractTimeSig(musicxml);
-        try {
-          const [extracted, keyEst] = await Promise.all([
-            api.extractNotes(musicxml),
-            api.analyzeKey(musicxml).catch(() => null),
-          ]);
-          tempo_bpm = extracted.tempo_bpm || 120;
-          if (keyEst?.key) key_signature = `${keyEst.key} ${keyEst.mode ?? ""}`.trim();
-        } catch {
-          // non-fatal — use defaults
-        }
-        const initialOp = buildScoreInitOp({
-          musicxml,
-          title,
-          composer: "",
-          tempo_bpm,
-          time_signature,
-          key_signature,
-        });
-        const spec: NewProjectSpec = {
-          title,
-          composer: "",
-          tempo_bpm,
-          time_signature,
-          key_signature,
-          instrumentation: [{ id: "guitar", instrument: "Classical Guitar", channel: 0 }],
-          initial_musicxml: musicxml,
-          initial_operation: initialOp,
-        };
-        await engine.newProject(spec);
+      let keyEst: KeyEstimate | null = null;
+      try {
+        keyEst = await api.analyzeKey(musicxml);
+      } catch {
+        keyEst = null;
       }
-      setImportDone(true);
-      setTimeout(onClose, 1200);
+
+      const prefs = loadEditorPreferences();
+      if (prefs.keySuggestionOnImport && keyEst && keyEst.confidence >= 0.5) {
+        setPendingMusicXml(musicxml);
+        setPendingTitle(title);
+        setPendingKey(keyEst);
+        return;
+      }
+
+      await finalizeImport(title, musicxml, keyEst);
     } catch (err: unknown) {
       setImportError(err instanceof Error ? err.message : String(err));
     } finally {
       setImporting(false);
+    }
+  }
+
+  async function handleApplyKey() {
+    if (!pendingMusicXml || !pendingKey) return;
+    setKeyBusy(true);
+    try {
+      await finalizeImport(pendingTitle, pendingMusicXml, pendingKey, true);
+    } catch (err: unknown) {
+      setImportError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setKeyBusy(false);
+    }
+  }
+
+  async function handleSkipKey() {
+    if (!pendingMusicXml) return;
+    setKeyBusy(true);
+    try {
+      await finalizeImport(pendingTitle, pendingMusicXml, pendingKey, false);
+    } catch (err: unknown) {
+      setImportError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setKeyBusy(false);
     }
   }
 
@@ -376,6 +440,15 @@ export function AudioImportDialog({
           </button>
         </div>
       </div>
+
+      <KeySuggestionDialog
+        open={!!pendingKey && !!pendingMusicXml}
+        estimate={pendingKey}
+        currentKey={engine.project?.meta.key_signature ?? null}
+        busy={keyBusy}
+        onApply={() => void handleApplyKey()}
+        onSkip={() => void handleSkipKey()}
+      />
     </div>
   );
 }

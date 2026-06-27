@@ -322,11 +322,6 @@ export function ProjectTree({
           {engine.loadError}
         </div>
       )}
-      {engine.saveError && (
-        <div className="mt-4 rounded border border-danger/40 bg-danger/10 p-2 text-[10px] text-danger">
-          save error: {engine.saveError}
-        </div>
-      )}
     </aside>
   );
 }

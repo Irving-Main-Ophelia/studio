@@ -8,10 +8,7 @@ and a one-line note about why it was deferred.
 
 ---
 
-- **Mouse note-entry (M1.1, deferred).** Click a staff line/space to insert a
-  note. Requires an OSMD selection layer (Bounding-Box → coordinate → pitch)
-  that overshoots the M1.1 budget. Keyboard + MIDI cover the workflow today;
-  revisit once the theory engine in M1.3 gives us pitch-by-coordinate.
+- **Mouse note-entry on imported scores (M1.7, partially built — BLOCKED).** `EditLayer`, hit-test, context menu, pitch drag, and `/score/edit/note/resolve` ship (ADR-0015), but the maintainer reports the staff still does not update after edits on real imports (June 2026). Keyboard + MIDI cover scratch composition; imported-score mouse edit must be fixed before closing M1.7.
 - **Lasso & range selection (M1.1, deferred).** Multi-note selection,
   cut/copy/paste, all-of-pitch-class. Belongs in the same OSMD-overlay PR as
   mouse entry.

@@ -20,12 +20,20 @@ from app.tools.score_edit import (
     ALLOWED_ARTICULATIONS,
     ALLOWED_DYNAMICS,
     append_measure,
+    change_note_duration,
+    change_note_pitch,
+    find_note_by_hint,
+    get_note_info,
     insert_note,
     insert_rest,
+    list_notes,
     remove_note,
+    respell_note,
     set_dynamic,
+    set_key_signature,
     set_tie,
     toggle_articulation,
+    transpose_note_semitones,
 )
 
 router = APIRouter(prefix="/score/edit", tags=["score-edit"])
@@ -94,6 +102,72 @@ class AppendMeasureIn(BaseModel):
     part_index: int = Field(0, ge=0)
 
 
+class ChangeDurationIn(_Common):
+    duration_quarters: float = Field(..., gt=0)
+
+
+class ChangePitchIn(_Common):
+    pitch: str = Field(..., description="Scientific pitch, e.g. 'F4', 'A#3'.")
+
+
+class TransposeSemitonesIn(_Common):
+    semitones: int = Field(..., description="Positive = up, negative = down.")
+
+
+class KeySignatureIn(BaseModel):
+    musicxml: str
+    tonic: str = Field(..., description="Tonic pitch class, e.g. 'A', 'F#', 'Bb'.")
+    mode: str = Field("major", description="'major' or 'minor'.")
+
+
+class NoteInfoResponse(BaseModel):
+    part_index: int
+    measure_number: int
+    beat_offset: float
+    voice: int | None
+    part_name: str
+    pitch: str | None
+    midi: int | None
+    duration_quarters: float
+    articulations: list[str]
+    is_rest: bool
+
+
+class MusicxmlOnly(BaseModel):
+    musicxml: str
+
+
+class ListNotesIn(BaseModel):
+    musicxml: str
+
+
+class ListedNote(BaseModel):
+    part_index: int
+    measure_number: int
+    beat_offset: float
+    voice: int | None
+    part_name: str
+    pitch: str
+    midi: int | None
+    duration_quarters: float
+
+
+class ListNotesResponse(BaseModel):
+    notes: list[ListedNote]
+
+
+class RespellResponse(MusicxmlOnly):
+    pitch: str
+
+
+class PitchResponse(MusicxmlOnly):
+    pitch: str
+
+
+class KeySignatureResponse(MusicxmlOnly):
+    key: str
+
+
 class EditCursor(BaseModel):
     part_index: int
     measure_number: int
@@ -114,10 +188,6 @@ class InsertedNote(BaseModel):
 
 class InsertNoteResponse(InsertResponse):
     inserted_note: InsertedNote
-
-
-class MusicxmlOnly(BaseModel):
-    musicxml: str
 
 
 class ToggleResponse(MusicxmlOnly):
@@ -236,5 +306,126 @@ def route_dynamic(req: DynamicIn) -> MusicxmlOnly:
 def route_append_measure(req: AppendMeasureIn) -> AppendMeasureResponse:
     try:
         return AppendMeasureResponse(**append_measure(req.musicxml, part_index=req.part_index))
+    except ValueError as exc:
+        raise _bad(str(exc)) from exc
+
+
+@router.post("/notes/list", response_model=ListNotesResponse)
+def route_list_notes(req: ListNotesIn) -> ListNotesResponse:
+    try:
+        return ListNotesResponse(**list_notes(req.musicxml))
+    except ValueError as exc:
+        raise _bad(str(exc)) from exc
+
+
+class ResolveNoteIn(BaseModel):
+    musicxml: str
+    measure_number: int = Field(..., ge=1)
+    pitch: str = Field(..., description="Pitch from the renderer, e.g. 'E4' or 'B4-D2'.")
+    beat_hint: float = Field(0.0, ge=0.0, description="Approximate quarter-note beat within the measure.")
+
+
+@router.post("/note/resolve", response_model=ListedNote)
+def route_resolve_note(req: ResolveNoteIn) -> ListedNote:
+    try:
+        return ListedNote(**find_note_by_hint(
+            req.musicxml,
+            measure_number=req.measure_number,
+            pitch=req.pitch,
+            beat_hint=req.beat_hint,
+        ))
+    except ValueError as exc:
+        raise _bad(str(exc)) from exc
+
+
+@router.post("/note/info", response_model=NoteInfoResponse)
+def route_note_info(req: RemoveNoteIn) -> NoteInfoResponse:
+    try:
+        return NoteInfoResponse(
+            **get_note_info(
+                req.musicxml,
+                part_index=req.part_index,
+                measure_number=req.measure_number,
+                beat_offset=req.beat_offset,
+                voice=req.voice,
+            )
+        )
+    except ValueError as exc:
+        raise _bad(str(exc)) from exc
+
+
+@router.post("/note/duration", response_model=MusicxmlOnly)
+def route_change_duration(req: ChangeDurationIn) -> MusicxmlOnly:
+    try:
+        return MusicxmlOnly(
+            **change_note_duration(
+                req.musicxml,
+                part_index=req.part_index,
+                measure_number=req.measure_number,
+                beat_offset=req.beat_offset,
+                duration_quarters=req.duration_quarters,
+                voice=req.voice,
+            )
+        )
+    except ValueError as exc:
+        raise _bad(str(exc)) from exc
+
+
+@router.post("/note/respell", response_model=RespellResponse)
+def route_respell(req: RemoveNoteIn) -> RespellResponse:
+    try:
+        return RespellResponse(
+            **respell_note(
+                req.musicxml,
+                part_index=req.part_index,
+                measure_number=req.measure_number,
+                beat_offset=req.beat_offset,
+                voice=req.voice,
+            )
+        )
+    except ValueError as exc:
+        raise _bad(str(exc)) from exc
+
+
+@router.post("/note/pitch", response_model=PitchResponse)
+def route_change_pitch(req: ChangePitchIn) -> PitchResponse:
+    try:
+        return PitchResponse(
+            **change_note_pitch(
+                req.musicxml,
+                part_index=req.part_index,
+                measure_number=req.measure_number,
+                beat_offset=req.beat_offset,
+                pitch=req.pitch,
+                voice=req.voice,
+            )
+        )
+    except ValueError as exc:
+        raise _bad(str(exc)) from exc
+
+
+@router.post("/note/transpose-semitones", response_model=PitchResponse)
+def route_transpose_semitones(req: TransposeSemitonesIn) -> PitchResponse:
+    try:
+        return PitchResponse(
+            **transpose_note_semitones(
+                req.musicxml,
+                part_index=req.part_index,
+                measure_number=req.measure_number,
+                beat_offset=req.beat_offset,
+                semitones=req.semitones,
+                voice=req.voice,
+            )
+        )
+    except ValueError as exc:
+        raise _bad(str(exc)) from exc
+
+
+@router.post("/key-signature/set", response_model=KeySignatureResponse)
+def route_set_key_signature(req: KeySignatureIn) -> KeySignatureResponse:
+    try:
+        return KeySignatureResponse(
+            **set_key_signature(req.musicxml, tonic=req.tonic, mode=req.mode)
+        )
     except ValueError as exc:
         raise _bad(str(exc)) from exc

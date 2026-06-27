@@ -31,6 +31,7 @@ The product is *not* fully Pro Tools yet — recording, world-music orchestratio
 - [x] **Pillar 7 (partial) — chat agent with 10 tools.** Every score-mutating tool returns a `ScoreDiff` (ADR-0012); the maintainer accepts, rejects, or refines via the diff overlay. Planner tools (`theory.analyze_form`, `score.add_section`, `score.reharmonize`) escalate to Opus 4.7; everything else stays on Sonnet 4.6. No voice in Phase 1.
 - [x] **Pillar 8 — Theory Tutor.** Tutor tab in the right rail (ADR-0014) calls `POST /theory/explain` and renders Roman numerals, cadences, and voice-leading intervals for the selected measure range.
 - [x] **Notation editor v1.** Note entry (computer keyboard grammar, mouse via OSMD selection, MIDI keyboard hooks ready), measure ops (append measure), articulations (staccato/accent/marcato/tenuto/fermata), dynamics (`pp`–`ff`), ties. Slurs, hairpins, lasso selection, and cut/paste deferred to M1.3 (theory) and Phase 2 (capture mode).
+- [ ] **Imported-score mouse editing (M1.7) — BLOCKED.** Infrastructure ships (see §1.17, ADR-0015): `EditLayer`, hit-test, context menu, pitch drag, `/score/edit/note/resolve`, non-rollback `applyEditOp`. **Acceptance not met:** on a real imported score (e.g. Chan Cil ~900 KB MusicXML), double-click / menu / vertical drag must change the rendered note. Maintainer reports selection chrome works but notation does not update (June 27, 2026).
 - [x] **Mixer v1.** Per-track volume / pan / mute / solo + master bus. Lives in the bottom rail.
 - [x] **Project model.** Folder format (§1.8), save/load, undo/redo, autosave every 30 s, crash recovery via the operation journal.
 - [x] **Operation log.** Every change is event-sourced. Replay reconstructs any historical state. (Diff viewer ships with M1.4.)
@@ -38,7 +39,7 @@ The product is *not* fully Pro Tools yet — recording, world-music orchestratio
 - [x] **UI.** ⌘K command palette via `cmdk` is live; the export dialog, transpose dialog, theory tutor tab, and diff overlay all use the obsidian + neon palette. The Framer-Motion choreography pass, self-hosted Cormorant Garamond / Bravura, and Parchment / Night score-theme switcher are tracked in `docs/parking-lot.md` for the M1.5 polish window.
 - [x] **Performance (current state).** The desktop bundle stays under 1 MB compressed; cold start to the splash screen is ~600 ms on the M2 Air. Play-from-cursor latency is bounded by the Web-Audio scheduler and measured at <30 ms in M1.2 tests. The full 60-fps timeline virtualisation pass lives in `docs/parking-lot.md` (M1.5 polish).
 - [x] **Tests.** Theory engine unit tests cover all six analyzers and four validators in `packages/theory/python/tests/` (13 green). Backend integration suite covers `/score/*`, `/theory/*`, `/agent/*`, `/export/*` (41 green). Frontend `vitest` covers the operation log + keyboard grammar (28 green). The Tauri-driven e2e (`new project → 8 bars → save → reopen → transpose → export PDF`) is parked alongside the demo recording in `docs/parking-lot.md`.
-- [x] **ADRs 0009–0014 written**, each superseding nothing.
+- [x] **ADRs 0009–0015 written**, each superseding nothing.
 - [ ] **A `phase-1-demo.mov`** exists in `docs/demos/` and ends with the maintainer playing a one-minute piano piece they wrote inside Stockhausen. *(Manual: recorded by the maintainer after `git tag v0.1.0-phase-1`.)*
 
 ---
@@ -51,7 +52,7 @@ Phase 1 builds **on top of** Phase 0; it does not redo the foundations. Concrete
 |---|---|---|
 | Tauri 2 shell + React 19 + Vite 7 + Tailwind 3 + shadcn | Working; `pnpm tauri:dev` opens the splash + 3-pane shell | **Keep.** Extend the shell with note-input surfaces and mixer rail. |
 | Design tokens (`src/styles/tokens.css`, `globals.css`) | Obsidian + neon palette wired into Tailwind | **Keep + expand.** Add motion variants, score themes (Parchment / Night), command-palette styles. |
-| Score view (`src/notation/ScoreView.tsx`, OSMD 1.9.9) | Renders fixture MusicXML | **Wrap, don't replace.** Add a custom edit layer on top of OSMD (selection, cursor, note-input). |
+| Score view (`src/notation/ScoreView.tsx`, OSMD 1.9.9) | Renders fixture MusicXML | **Wrap, don't replace.** OSMD is display-only; edits mutate MusicXML via local FastAPI + music21, then `osmd.load` re-render (ADR-0015). `EditLayer` handles pointer hit-test, menu, pitch drag. |
 | Audio (`src/audio/Player.ts`, `smplr` + `SplendidGrandPiano`) | Plays a flat note list at the AudioContext clock | **Promote behind the same interface.** Phase 1 swaps the implementation to `sfizz.wasm` for multi-instrument playback, but the `Player.play / .stop / .preload` surface stays. See ADR-0005. |
 | Audio meter (CPAL → `audio:meter` Tauri event) | Working | **Keep.** Already meets the bottom-rail need; no changes needed for Phase 1. |
 | MIDI hook (`src/lib/useMidi.ts` via Web MIDI) | Lists devices + tails events | **Extend.** Turn into a real note-entry source feeding the notation editor cursor. |
@@ -87,6 +88,7 @@ The heart of the product.
 
 - Note input modes:
   - **Mouse** — click a staff line/space at a beat position → note appears. Drag for ties / slurs.
+  - **Imported scores (M1.7, in progress):** double-click / right-click opens `NoteEditMenu`; vertical drag transposes by semitone. Pipeline: OSMD hit-test → `note/resolve` → `/score/edit/*` → MusicXML commit → `osmd.clear()` + reload. See ADR-0015. **Not yet verified on large real-world imports.**
   - **Computer keyboard** — `C D E F G A B` for pitches; `1 2 4 8 6 3` for durations (whole, half, quarter, eighth, sixteenth, triplet); `Shift+#` / `Shift+b` for accidentals; `.` for augmentation dot; arrows for cursor; `R` for rest.
   - **MIDI keyboard** — `useMidi` hook already enumerates devices; we extend it to feed the cursor in **step-time** mode (default) and **tap-rhythm** mode (later in Phase 1; real-time capture without metronome is a Phase 2 thing).
 - Voice & staff handling — multiple voices per staff; grand staff for piano with cross-staff beaming.
@@ -350,11 +352,16 @@ New folders to populate during Phase 1 (not all at once — per milestone):
 ```
 apps/desktop/src/
 ├── notation/
-│   ├── ScoreView.tsx          # existing — wrapped now
-│   ├── EditLayer.tsx          # NEW — cursor, selection, ghost overlay
-│   ├── NoteInput.tsx          # NEW — keyboard + MIDI step-time
-│   ├── Selection.ts           # NEW
-│   └── shortcuts.ts           # NEW — keymap registry
+│   ├── ScoreView.tsx          # OSMD mount + reload on musicxml change
+│   ├── EditLayer.tsx          # pointer hit-test, selection, pitch drag, menu host
+│   ├── NoteEditMenu.tsx       # context menu (duration, pitch, articulation, dynamics)
+│   ├── ScoreEmptyState.tsx
+│   ├── osmdFactory.ts         # OSMD instance (Plain skyline, log level error)
+│   ├── osmdHitTest.ts         # graphic tree → SelectedNote + bbox
+│   ├── osmdAnnotate.ts        # stamp SVG groups from list_notes / OSMD graphic match
+│   ├── noteResolve.ts         # measure+pitch+beat matching; time sig helpers
+│   ├── pitchDrag.ts           # semitone drag math
+│   └── useViewportMenuPosition.ts
 ├── audio/
 │   ├── Player.ts              # existing — implementation swap
 │   ├── Engine.ts              # NEW — sfizz worklet wiring + Tone transport
@@ -469,6 +476,7 @@ Phase 1 deliberately does **not** add:
 | 0012 | Agent tool-call contract — `ScoreDiff` envelope, never mutating | M1.4 |
 | 0013 | PDF engraving — Verovio compiled to WASM | M1.5 |
 | 0014 | Phase-1 LLM mix — Sonnet 4.6 default, Opus 4.7 for planner tools | M1.4 |
+| 0015 | Notation editing — OSMD display, music21 mutation, coordinate resolve | M1.7 |
 
 Each ADR follows the existing template (Context / Decision / Alternatives / Consequences). None of these supersede an existing ADR — they extend Phase 0's stack.
 
@@ -513,6 +521,7 @@ Every Phase-1 surface obeys `AGENTS.md` §11 verbatim. The rules that matter her
 | First-draft generation produces bland chamber music | Medium | Medium | Treat output as a starting point; iterate on the planner prompt; offer *"Regenerate with stronger motivic development"* refinement. Don't gate Phase 1 on perfect output. |
 | Performance: 100-bar piece on M2 Air | Medium | High | Lazy-render OSMD only the visible bars; virtualize the timeline; profile early; measure 60 fps on a real M2 Air, not just on the dev machine. |
 | Note-entry keyboard layout conflicts with macOS or with `useMidi` step-time | Low | Medium | Single keymap registry (`shortcuts.ts`); ⌘K palette lists every shortcut; all remappable. |
+| OSMD display vs music21 edit coordinates diverge on imported scores | High | High | ADR-0015 pipeline + `/score/edit/note/resolve`. Debug with Network tab + `list_notes` diff. Do not edit OSMD tree in place. |
 | Crash recovery loses an operation | Low | High | Append-only log + `fsync` after every event; snapshot every 100 ops; replay tested by an integration test (§J). |
 | The 8-round-trip tool budget is too tight for `score.add_section` | Medium | Low | Allow per-tool budgets (`add_section` gets 16; others stay at 8). Make budget configurable per ADR-0014. |
 | Verovio engraving disagrees with the maintainer's taste | Medium | Low | Expose layout knobs (paper size, staff size, system breaks); document that *engraving polish is iterative* and that we are not Henle. |
@@ -554,3 +563,45 @@ Phase 1 is complete when every DoD box in §1.2 is checked. At that point:
 4. Move to [`PHASE_2.md`](./PHASE_2.md).
 
 If the review finds we should not continue, that is information — write a *parking-lot* entry, archive the state, and stop. No defeatism (`AGENTS.md` §2, "Never be defeatist"); but no momentum-for-momentum's-sake either.
+
+---
+
+## 1.17 Session log — imported-score mouse editing (June 27, 2026)
+
+**Goal:** Word-like note editing on imported MusicXML in the browser (`localhost:1420`): select, context menu, vertical pitch drag; changes must appear on the staff.
+
+**Mindset shift (documented in ADR-0015):** The score on screen is **not** editable SVG. OSMD draws a picture. The **only** source of truth is the MusicXML string in `ScoreEngine`. Interaction layers are worthless unless they (1) resolve to music21 coordinates, (2) call `/score/edit/*`, (3) commit the returned XML, (4) force OSMD to reload.
+
+### Shipped this session
+
+| Layer | What |
+|-------|------|
+| Backend | `transpose_note_semitones` pitch bugfix; `list_notes`; `find_note_by_hint` + `POST /score/edit/note/resolve` |
+| Frontend overlay | `EditLayer`, `NoteEditMenu`, `osmdHitTest`, `osmdAnnotate`, `pitchDrag`, `noteResolve` |
+| ScoreEngine | `applyEditOp` commits XML immediately; playback re-extract in background **without rollback**; `resolveNoteForApi` before every edit |
+| ScoreView | Separate OSMD mount vs React overlay; `osmd.clear()` before reload; IndexedDB project save for large XML |
+| UX | Errors in console + status bar (not on score); `editEnabled` when score loaded |
+
+### Known open blocker
+
+Maintainer confirms: **highlight + menu + drag preview work; the notation itself does not change.** No console errors reported. Suspected failure modes for the next agent:
+
+1. Edit API never called (handler / `busy` / event swallowing).
+2. API called with wrong coordinates → 400 swallowed or wrong note edited off-screen.
+3. API returns 200 but `engine.score.musicxml` does not update or OSMD does not reload.
+4. Reload happens but identical visual (edit applied to different voice/part).
+5. Large-score timing: user perceives no change before async reload completes.
+
+### Verification checklist (next agent)
+
+1. `pnpm dev:stack` — backend `:8000`, Vite `:1420`.
+2. Load Chan Cil (or `public/fixtures/bach-chorale-bwv66-6.musicxml` as control).
+3. DevTools → Network: on +1 st from menu, expect `note/resolve` then `transpose-semitones` → 200.
+4. Response `musicxml` must differ; `engine.score.musicxml` must update; OSMD must re-render changed pitch.
+5. If API 400: log `part_index`, `measure_number`, `beat_offset` from menu header vs `list_notes` row.
+
+### References
+
+- ADR-0015 — architecture
+- `docs/parking-lot.md` — mouse entry status updated
+- Agent transcript: `55605cb2-cff6-4fb4-8553-5ecd93a911a0`

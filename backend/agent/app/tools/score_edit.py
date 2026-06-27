@@ -25,8 +25,9 @@ from __future__ import annotations
 
 from typing import Any, Literal, cast
 
-from music21 import articulations, dynamics, expressions, stream
+from music21 import articulations, dynamics, expressions, key, stream
 from music21 import base as m21base
+from music21 import chord as m21chord
 from music21 import duration as m21duration
 from music21 import note as m21note
 from music21 import pitch as m21pitch
@@ -39,7 +40,7 @@ TieType = Literal["start", "stop", "continue", "none"]
 # Quarter-note tolerance for "this offset matches that note". 1/250 of a beat
 # is well below 1 ms at any practical tempo and survives music21's float
 # rounding when notes round-trip through MusicXML divisions.
-OFFSET_TOLERANCE = 1e-3
+OFFSET_TOLERANCE = 1e-2
 
 # Fermata lives under `music21.expressions`, not `articulations` — but for the
 # editor it behaves like an articulation, so we expose it through the same map.
@@ -106,6 +107,15 @@ def _find_note_at(
     for el in candidates:
         delta = abs(float(el.offset) - beat_offset)
         if delta <= tolerance and (best is None or delta < best[0]):
+            best = (delta, el)
+    if best is not None:
+        return best[1]
+    # Fallback: nearest pitched element within half a beat (floating-point slop).
+    for el in candidates:
+        if isinstance(el, m21note.Rest):
+            continue
+        delta = abs(float(el.offset) - beat_offset)
+        if delta <= 0.5 and (best is None or delta < best[0]):
             best = (delta, el)
     return best[1] if best else None
 
@@ -249,33 +259,41 @@ def toggle_articulation(
     measure = _get_measure(part, measure_number)
     container = _find_voice_or_measure(measure, voice)
     existing = _find_note_at(container, beat_offset)
-    if existing is None or not isinstance(existing, m21note.Note):
+    if existing is None or not isinstance(existing, m21note.NotRest):
         raise ValueError(
             f"No note found at part={part_index} measure={measure_number} beat={beat_offset}"
         )
 
     cls = ALLOWED_ARTICULATIONS[articulation]
-    # Fermata is an Expression; everything else is an Articulation. Both live
-    # on the Note, but on different lists.
+    target_notes: list[m21note.Note] = []
+    if isinstance(existing, m21note.Note):
+        target_notes = [existing]
+    elif isinstance(existing, m21chord.Chord):
+        target_notes = list(existing.notes)
+
+    if not target_notes:
+        raise ValueError("No pitched notes to articulate at this position.")
+
+    action = "added"
     if issubclass(cls, expressions.Expression):
         cls_expr: type[expressions.Expression] = cls
-        present_e = [a for a in existing.expressions if isinstance(a, cls_expr)]
-        if present_e:
-            existing.expressions = [a for a in existing.expressions if not isinstance(a, cls_expr)]
+        if any(isinstance(a, cls_expr) for n in target_notes for a in n.expressions):
+            for n in target_notes:
+                n.expressions = [a for a in n.expressions if not isinstance(a, cls_expr)]
             action = "removed"
         else:
-            existing.expressions.append(cls_expr())
+            for n in target_notes:
+                n.expressions.append(cls_expr())
             action = "added"
     else:
         cls_art = cast(type[articulations.Articulation], cls)
-        present_a = [a for a in existing.articulations if isinstance(a, cls_art)]
-        if present_a:
-            existing.articulations = [
-                a for a in existing.articulations if not isinstance(a, cls_art)
-            ]
+        if any(isinstance(a, cls_art) for n in target_notes for a in n.articulations):
+            for n in target_notes:
+                n.articulations = [a for a in n.articulations if not isinstance(a, cls_art)]
             action = "removed"
         else:
-            existing.articulations.append(cls_art())
+            for n in target_notes:
+                n.articulations.append(cls_art())
             action = "added"
     return {"musicxml": _serialise(score), "action": action}
 
@@ -328,6 +346,261 @@ def set_dynamic(
     marker = dynamics.Dynamic(dynamic)  # type: ignore[no-untyped-call]
     measure.insert(beat_offset, marker)  # type: ignore[no-untyped-call]
     return {"musicxml": _serialise(score)}
+
+
+def get_note_info(
+    musicxml: str,
+    *,
+    part_index: int,
+    measure_number: int,
+    beat_offset: float,
+    voice: int | None = None,
+) -> dict[str, Any]:
+    """Return metadata for the note at a score position (for the edit overlay)."""
+    score = _parse(musicxml)
+    part = _get_part(score, part_index)
+    measure = _get_measure(part, measure_number)
+    container = _find_voice_or_measure(measure, voice)
+    existing = _find_note_at(container, beat_offset)
+    if existing is None or not isinstance(existing, m21note.NotRest):
+        raise ValueError(
+            f"No note found at part={part_index} measure={measure_number} beat={beat_offset}"
+        )
+
+    part_name = str(getattr(part, "partName", None) or f"Part {part_index + 1}")
+    articulations_list = (
+        [type(a).__name__.lower() for a in existing.articulations]
+        if isinstance(existing, m21note.Note)
+        else []
+    )
+    expressions_list = (
+        [type(e).__name__.lower() for e in existing.expressions]
+        if isinstance(existing, m21note.Note)
+        else []
+    )
+
+    pitch_name: str | None = None
+    midi_val: int | None = None
+    if isinstance(existing, m21note.Note):
+        pitch_name = existing.pitch.nameWithOctave
+        midi_val = int(existing.pitch.midi)
+
+    return {
+        "part_index": part_index,
+        "measure_number": measure_number,
+        "beat_offset": beat_offset,
+        "voice": voice,
+        "part_name": part_name,
+        "pitch": pitch_name,
+        "midi": midi_val,
+        "duration_quarters": float(existing.duration.quarterLength),
+        "articulations": articulations_list + expressions_list,
+        "is_rest": isinstance(existing, m21note.Rest),
+    }
+
+
+def change_note_duration(
+    musicxml: str,
+    *,
+    part_index: int,
+    measure_number: int,
+    beat_offset: float,
+    duration_quarters: float,
+    voice: int | None = None,
+) -> dict[str, Any]:
+    if duration_quarters <= 0:
+        raise ValueError("duration_quarters must be positive")
+    score = _parse(musicxml)
+    part = _get_part(score, part_index)
+    measure = _get_measure(part, measure_number)
+    container = _find_voice_or_measure(measure, voice)
+    existing = _find_note_at(container, beat_offset)
+    if existing is None or not isinstance(existing, m21note.NotRest):
+        raise ValueError(
+            f"No note found at part={part_index} measure={measure_number} beat={beat_offset}"
+        )
+    existing.duration = m21duration.Duration(duration_quarters)
+    return {"musicxml": _serialise(score)}
+
+
+def respell_note(
+    musicxml: str,
+    *,
+    part_index: int,
+    measure_number: int,
+    beat_offset: float,
+    voice: int | None = None,
+) -> dict[str, Any]:
+    """Toggle enharmonic spelling for the note at the given position."""
+    score = _parse(musicxml)
+    part = _get_part(score, part_index)
+    measure = _get_measure(part, measure_number)
+    container = _find_voice_or_measure(measure, voice)
+    existing = _find_note_at(container, beat_offset)
+    if existing is None or not isinstance(existing, m21note.Note):
+        raise ValueError(
+            f"No note found at part={part_index} measure={measure_number} beat={beat_offset}"
+        )
+    existing.pitch = existing.pitch.getEnharmonic()
+    return {
+        "musicxml": _serialise(score),
+        "pitch": existing.pitch.nameWithOctave,
+    }
+
+
+def change_note_pitch(
+    musicxml: str,
+    *,
+    part_index: int,
+    measure_number: int,
+    beat_offset: float,
+    pitch: str,
+    voice: int | None = None,
+) -> dict[str, Any]:
+    """Replace the note or chord at ``beat_offset`` with a single pitched note."""
+    score = _parse(musicxml)
+    part = _get_part(score, part_index)
+    measure = _get_measure(part, measure_number)
+    container = _find_voice_or_measure(measure, voice)
+    existing = _find_note_at(container, beat_offset)
+    if existing is None or not isinstance(existing, m21note.NotRest):
+        raise ValueError(
+            f"No note found at part={part_index} measure={measure_number} beat={beat_offset}"
+        )
+    dur = float(existing.duration.quarterLength)
+    new_note = _make_note(pitch, dur)
+    container.replace(existing, new_note)
+    return {
+        "musicxml": _serialise(score),
+        "pitch": new_note.pitch.nameWithOctave,
+    }
+
+
+def transpose_note_semitones(
+    musicxml: str,
+    *,
+    part_index: int,
+    measure_number: int,
+    beat_offset: float,
+    semitones: int,
+    voice: int | None = None,
+) -> dict[str, Any]:
+    """Move the top pitch of a note/chord up or down by ``semitones``."""
+    if semitones == 0:
+        raise ValueError("semitones must be non-zero")
+    score = _parse(musicxml)
+    part = _get_part(score, part_index)
+    measure = _get_measure(part, measure_number)
+    container = _find_voice_or_measure(measure, voice)
+    existing = _find_note_at(container, beat_offset)
+    if existing is None or not isinstance(existing, m21note.NotRest):
+        raise ValueError(
+            f"No note found at part={part_index} measure={measure_number} beat={beat_offset}"
+        )
+    if isinstance(existing, m21chord.Chord):
+        top = existing.sortAscending().pitches[-1]
+        transposed = top.transpose(semitones, inPlace=False)
+        dur = float(existing.duration.quarterLength)
+        new_note = _make_note(transposed.nameWithOctave, dur)
+        container.replace(existing, new_note)
+        return {"musicxml": _serialise(score), "pitch": transposed.nameWithOctave}
+    if isinstance(existing, m21note.Note):
+        transposed = existing.pitch.transpose(semitones, inPlace=False)
+        existing.pitch = transposed
+        return {"musicxml": _serialise(score), "pitch": transposed.nameWithOctave}
+    raise ValueError("Cannot transpose a rest.")
+
+
+def set_key_signature(
+    musicxml: str,
+    *,
+    tonic: str,
+    mode: str = "major",
+) -> dict[str, Any]:
+    """Apply a key signature to the first measure of every part."""
+    score = _parse(musicxml)
+    ks = key.Key(tonic, mode)
+    for part in score.parts:
+        measures = list(part.getElementsByClass(stream.Measure))
+        if not measures:
+            continue
+        first = measures[0]
+        for existing in list(first.getElementsByClass(key.KeySignature)):
+            first.remove(existing)
+        first.insert(0, ks)
+    return {
+        "musicxml": _serialise(score),
+        "key": f"{tonic} {mode}",
+    }
+
+
+def _beat_hint_distance(note_beat: float, hint: float) -> float:
+    """Compare a music21 beat to a hint that may be quarters or a measure fraction."""
+    return min(abs(note_beat - h) for h in (hint, hint * 4.0, hint / 4.0))
+
+
+def find_note_by_hint(
+    musicxml: str,
+    *,
+    measure_number: int,
+    pitch: str,
+    beat_hint: float,
+) -> dict[str, Any]:
+    """Resolve the authoritative score position for a visual note click."""
+    notes = list_notes(musicxml)["notes"]
+    in_measure = [n for n in notes if int(n["measure_number"]) == measure_number]
+    if not in_measure:
+        raise ValueError(f"No notes in measure {measure_number}")
+
+    primary = pitch.split("-")[0].strip()
+    pitch_hits = [
+        n
+        for n in in_measure
+        if n["pitch"] == pitch
+        or str(n["pitch"]).startswith(f"{primary}-")
+        or primary in str(n["pitch"]).split("-")
+    ]
+    pool = pitch_hits or in_measure
+    return min(pool, key=lambda n: _beat_hint_distance(float(n["beat_offset"]), beat_hint))
+
+
+def list_notes(musicxml: str) -> dict[str, Any]:
+    """Enumerate every pitched note in score order (for SVG annotation)."""
+    score = _parse(musicxml)
+    out: list[dict[str, Any]] = []
+    for part_idx, part in enumerate(score.parts):
+        part_name = str(getattr(part, "partName", None) or f"Part {part_idx + 1}")
+        for measure in part.getElementsByClass(stream.Measure):
+            for el in measure.notesAndRests:
+                if isinstance(el, m21note.Note):
+                    out.append(
+                        {
+                            "part_index": part_idx,
+                            "measure_number": int(measure.number),
+                            "beat_offset": float(el.offset),
+                            "voice": None,
+                            "part_name": part_name,
+                            "pitch": el.pitch.nameWithOctave,
+                            "midi": int(el.pitch.midi),
+                            "duration_quarters": float(el.duration.quarterLength),
+                        }
+                    )
+                elif isinstance(el, m21chord.Chord):
+                    pitches = "-".join(p.nameWithOctave for p in el.pitches)
+                    top = el.sortAscending().pitches[-1] if el.pitches else None
+                    out.append(
+                        {
+                            "part_index": part_idx,
+                            "measure_number": int(measure.number),
+                            "beat_offset": float(el.offset),
+                            "voice": None,
+                            "part_name": part_name,
+                            "pitch": pitches,
+                            "midi": int(top.midi) if top is not None else None,
+                            "duration_quarters": float(el.duration.quarterLength),
+                        }
+                    )
+    return {"notes": out}
 
 
 def append_measure(

@@ -226,3 +226,112 @@ def test_full_short_phrase_round_trip(client: TestClient) -> None:
     assert notes_res.status_code == 200
     extracted = [n["midi"] for n in notes_res.json()["notes"]]
     assert extracted == [60, 62, 64, 65, 67]
+
+
+def test_note_info_after_insert(client: TestClient) -> None:
+    inserted = _insert_quarter(client, musicxml=BLANK_PIANO_SCORE, pitch="E4", measure=1, beat=0.0)
+    res = client.post(
+        "/score/edit/note/info",
+        json={
+            "musicxml": inserted["musicxml"],
+            "part_index": 0,
+            "measure_number": 1,
+            "beat_offset": 0.0,
+        },
+    )
+    assert res.status_code == 200
+    body = res.json()
+    assert body["pitch"] == "E4"
+    assert body["duration_quarters"] == 1.0
+    assert body["is_rest"] is False
+
+
+def test_change_duration(client: TestClient) -> None:
+    inserted = _insert_quarter(client, musicxml=BLANK_PIANO_SCORE, pitch="C4", measure=1, beat=0.0)
+    res = client.post(
+        "/score/edit/note/duration",
+        json={
+            "musicxml": inserted["musicxml"],
+            "part_index": 0,
+            "measure_number": 1,
+            "beat_offset": 0.0,
+            "duration_quarters": 2.0,
+        },
+    )
+    assert res.status_code == 200
+    assert "<type>half</type>" in res.json()["musicxml"]
+
+
+def test_respell_note(client: TestClient) -> None:
+    inserted = _insert_quarter(client, musicxml=BLANK_PIANO_SCORE, pitch="F#4", measure=1, beat=0.0)
+    res = client.post(
+        "/score/edit/note/respell",
+        json={
+            "musicxml": inserted["musicxml"],
+            "part_index": 0,
+            "measure_number": 1,
+            "beat_offset": 0.0,
+        },
+    )
+    assert res.status_code == 200
+    assert res.json()["pitch"] == "G-4"
+
+
+def test_set_key_signature(client: TestClient) -> None:
+    res = client.post(
+        "/score/edit/key-signature/set",
+        json={"musicxml": BLANK_PIANO_SCORE, "tonic": "A", "mode": "major"},
+    )
+    assert res.status_code == 200
+    assert res.json()["key"] == "A major"
+    assert "<fifths>3</fifths>" in res.json()["musicxml"]
+
+
+def test_transpose_semitones(client: TestClient) -> None:
+    inserted = _insert_quarter(client, musicxml=BLANK_PIANO_SCORE, pitch="G4", measure=1, beat=0.0)
+    res = client.post(
+        "/score/edit/note/transpose-semitones",
+        json={
+            "musicxml": inserted["musicxml"],
+            "part_index": 0,
+            "measure_number": 1,
+            "beat_offset": 0.0,
+            "semitones": 1,
+        },
+    )
+    assert res.status_code == 200, res.text
+    assert res.json()["pitch"] == "G#4"
+
+
+def test_change_pitch(client: TestClient) -> None:
+    inserted = _insert_quarter(client, musicxml=BLANK_PIANO_SCORE, pitch="A4", measure=1, beat=0.0)
+    res = client.post(
+        "/score/edit/note/pitch",
+        json={
+            "musicxml": inserted["musicxml"],
+            "part_index": 0,
+            "measure_number": 1,
+            "beat_offset": 0.0,
+            "pitch": "F4",
+        },
+    )
+    assert res.status_code == 200, res.text
+    assert res.json()["pitch"] == "F4"
+
+
+def test_resolve_note_by_hint_wrong_part(client: TestClient) -> None:
+    inserted = _insert_quarter(client, musicxml=BLANK_PIANO_SCORE, pitch="D4", measure=1, beat=0.0)
+    res = client.post(
+        "/score/edit/note/resolve",
+        json={
+            "musicxml": inserted["musicxml"],
+            "measure_number": 1,
+            "pitch": "D4",
+            "beat_hint": 0.25,
+        },
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["pitch"] == "D4"
+    assert body["beat_offset"] == 0.0
+    assert body["part_index"] == 0
