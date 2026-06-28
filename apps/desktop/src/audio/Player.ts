@@ -1,25 +1,28 @@
 /**
- * Phase-1 audio engine.
+ * Phase-3.5 audio engine.
  *
- * Built on Web Audio + smplr's SplendidGrandPiano for the actual sound, with
- * a real mixer rail in front: per-track gain/pan/mute/solo + master. The
- * public surface stays close to Phase 0 (`play / stop / preload`) and gains
- * three new controls:
+ * Built on Web Audio with a real mixer rail in front (per-track gain/pan/mute/solo
+ * + master) and a per-part sampler bank behind it (`Engine`): a distinct instrument
+ * voice per score part — violin, cello, flute — instead of one piano for everything.
+ * The public surface stays exactly as Phase 1 (`play / stop / preload`, loop,
+ * count-in, click, play-from-cursor); the multi-instrument upgrade happens entirely
+ * inside, behind the unchanged surface (ADR-0010).
  *
  *   - `setLoop(start_sec, end_sec)` to play a region on repeat
  *   - `playFrom(seconds)` to start playback at an arbitrary cursor
  *   - `setClick(enabled)` + `setCountIn(bars)` for the metronome / pre-roll
+ *   - `setParts(parts)` to choose the instrument per part (M3.5.1)
+ *   - `setSamplingMode("piano-only")` for the low-RAM path (M2 Air)
  *
- * Real multi-instrument playback (sfizz.wasm + VSCO 2 CE etc.) is the next
- * iteration of this file; see ADR-0010 for the engine-swap strategy.
+ * The high-fidelity sfizz.wasm + VSCO 2 CE path slots into the same `Engine`
+ * sampler interface when that binary/sample set lands (PHASE_3_5.md §3.5.4 B).
  *
  * Web Audio note: AudioContext must be created (and resumed) from a user
  * gesture. We lazy-create it on first play.
  */
 
-import { SplendidGrandPiano } from "smplr";
-
 import type { NoteEvent } from "../lib/api";
+import { Engine, type PartInstrument, type SamplingMode } from "./Engine";
 import { Mixer, type MixerSnapshot } from "./Mixer";
 
 export type PlayerStatus = "idle" | "loading" | "ready" | "playing" | "error";
@@ -28,6 +31,8 @@ export interface PlayerListener {
   onStatusChange?(status: PlayerStatus, error?: Error): void;
   onProgress?(positionSec: number): void;
   onEnded?(): void;
+  /** Coarse sampler-load progress for the loading UI (M3.5.1). */
+  onLoadProgress?(done: number, total: number, label: string): void;
 }
 
 export interface LoopRegion {
@@ -35,14 +40,15 @@ export interface LoopRegion {
   end_sec: number;
 }
 
-const DEFAULT_TRACK_ID = "piano";
 const COUNT_IN_FREQ = 880; // A5 click
 const COUNT_IN_DOWNBEAT_FREQ = 1100; // brighter on beat 1
 
 export class Player {
   private context: AudioContext | null = null;
-  private piano: SplendidGrandPiano | null = null;
+  private engine: Engine | null = null;
   private mixer: Mixer | null = null;
+  private parts: PartInstrument[] = [];
+  private samplingMode: SamplingMode = "multi";
   private status: PlayerStatus = "idle";
   private listener: PlayerListener;
   private rafHandle: number | null = null;
@@ -82,19 +88,40 @@ export class Player {
         (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
       this.context = new Ctor();
       this.mixer = new Mixer(this.context);
+      this.engine = new Engine(this.context, this.mixer, {
+        onLoadProgress: (done, total, label) => this.listener.onLoadProgress?.(done, total, label),
+      });
+      this.engine.setMode(this.samplingMode);
+      this.engine.setParts(this.parts);
     }
     return this.context;
+  }
+
+  /** Choose the instrument per part (M3.5.1). Reloads the sampler bank on next play/preload. */
+  setParts(parts: PartInstrument[]): void {
+    this.parts = parts;
+    this.engine?.setParts(parts);
+    // A new instrument bank must be (re)loaded before it can sound.
+    this.loaded = false;
+  }
+
+  setSamplingMode(mode: SamplingMode): void {
+    if (mode === this.samplingMode) return;
+    this.samplingMode = mode;
+    this.engine?.setMode(mode);
+    this.loaded = false;
+  }
+
+  getSamplingMode(): SamplingMode {
+    return this.samplingMode;
   }
 
   async preload(): Promise<void> {
     if (this.loaded) return;
     this.setStatus("loading");
     try {
-      const ctx = this.ensureContext();
-      if (!this.mixer) this.mixer = new Mixer(ctx);
-      const { input } = this.mixer.ensureTrack(DEFAULT_TRACK_ID);
-      this.piano = new SplendidGrandPiano(ctx, { destination: input });
-      await this.piano.load;
+      this.ensureContext();
+      await this.engine?.preload();
       this.loaded = true;
       this.setStatus("ready");
     } catch (err) {
@@ -104,11 +131,8 @@ export class Player {
   }
 
   setMixerSnapshot(snapshot: MixerSnapshot): void {
-    if (!this.mixer) {
-      const ctx = this.ensureContext();
-      this.mixer = new Mixer(ctx);
-    }
-    this.mixer.setSnapshot(snapshot);
+    this.ensureContext();
+    this.mixer?.setSnapshot(snapshot);
   }
 
   setLoop(region: LoopRegion | null): void {
@@ -130,7 +154,7 @@ export class Player {
 
   async play(notes: NoteEvent[], totalDurationSec: number, fromSec = 0): Promise<void> {
     await this.preload();
-    if (!this.piano || !this.context) return;
+    if (!this.engine || !this.context) return;
 
     this.stop(); // clears prior playback; also suspends the AudioContext
     await this.context.resume(); // always resume — stop() suspends it
@@ -167,7 +191,7 @@ export class Player {
     offsetSec: number,
     loop: LoopRegion | null,
   ): void {
-    if (!this.piano) return;
+    if (!this.engine) return;
     if (loop) {
       const loopLen = loop.end_sec - loop.start_sec;
       const repetitions = Math.max(1, Math.ceil(8 / Math.max(loopLen, 0.001)));
@@ -178,7 +202,7 @@ export class Player {
         );
         for (const evt of inLoop) {
           const t = startTime + (evt.start_sec - loop.start_sec) + cycleOffset;
-          this.piano.start({
+          this.engine.startNote(evt.part_index, {
             note: evt.midi,
             time: t,
             duration: Math.max(0.01, evt.duration_sec),
@@ -192,7 +216,7 @@ export class Player {
     }
     for (const evt of notes) {
       if (evt.start_sec + evt.duration_sec < offsetSec) continue;
-      this.piano.start({
+      this.engine.startNote(evt.part_index, {
         note: evt.midi,
         time: startTime + Math.max(0, evt.start_sec - offsetSec),
         duration: Math.max(0.01, evt.duration_sec),
@@ -259,7 +283,7 @@ export class Player {
       window.cancelAnimationFrame(this.rafHandle);
       this.rafHandle = null;
     }
-    this.piano?.stop();
+    this.engine?.stopAll();
     // Suspend the AudioContext so future-scheduled Web Audio nodes are silenced
     // immediately. play() calls context.resume() before the next playback.
     void this.context?.suspend();
@@ -279,8 +303,8 @@ export class Player {
 
   dispose(): void {
     this.stop();
-    this.piano?.disconnect();
-    this.piano = null;
+    this.engine?.dispose();
+    this.engine = null;
     this.mixer?.dispose();
     this.mixer = null;
     if (this.context) {

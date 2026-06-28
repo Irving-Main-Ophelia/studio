@@ -21,12 +21,30 @@ export function MixerPane() {
   const master = engine.mixer.master;
   const click = engine.clickEnabled;
   const countIn = engine.countInBars;
+  const pianoOnly = engine.samplingMode === "piano-only";
+  const load = engine.samplerLoad;
 
   return (
     <section className="flex h-full flex-col rounded-md border border-obsidian-700/60 bg-obsidian-900/40 px-3 py-2">
       <div className="mb-1 flex items-center justify-between">
         <span className="num uppercase tracking-widest text-zinc-500">Mixer</span>
         <div className="flex items-center gap-2 text-[10px]">
+          {load && (
+            <span className="num flex items-center gap-1 rounded bg-neon-violet/15 px-1.5 py-0.5 text-neon-violet">
+              loading {load.label} {load.done}/{load.total}
+            </span>
+          )}
+          <button
+            onClick={() => engine.setSamplingMode(pianoOnly ? "multi" : "piano-only")}
+            title="Use a single piano for every part (low RAM). Off = a distinct instrument per part."
+            className={`num rounded px-1.5 py-0.5 transition-colors ${
+              pianoOnly
+                ? "bg-neon-amber/15 text-neon-amber"
+                : "text-zinc-500 hover:bg-obsidian-700"
+            }`}
+          >
+            piano only
+          </button>
           <Toggle
             label="click"
             active={click}
@@ -54,7 +72,7 @@ export function MixerPane() {
         {tracks.map((t) => (
           <ChannelStrip
             key={t.id}
-            label={prettifyTrack(t.id)}
+            label={t.name ?? prettifyTrack(t.id)}
             gain_db={t.gain_db}
             pan={t.pan}
             mute={t.mute}

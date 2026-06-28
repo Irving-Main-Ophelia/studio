@@ -72,15 +72,24 @@ export async function exportMidi(
 }
 
 export async function exportWav(
+  renderReal: () => Promise<Blob>,
   musicxml: string,
   projectTitle: string,
 ): Promise<ExportArtifact> {
-  // Phase 1 ships the backend fallback for portability. The frontend
-  // OfflineAudioContext + sampler path is wired in M1.5 polish once we
-  // have the sfizz.wasm sampler online.
-  const body = await postJson<{ wav_base64: string }>("/export/wav", { musicxml });
+  // Primary path (M3.5.1 B3): render through the real sampler + mixer chain on an
+  // OfflineAudioContext, so the WAV matches what you hear. The backend sine-bank is
+  // a clearly-labelled emergency fallback used only if the real render fails
+  // (e.g. instrument samples could not be fetched).
+  let blob: Blob;
+  try {
+    blob = await renderReal();
+  } catch (err) {
+    console.warn("WAV export: real offline render failed; using backend sine-bank fallback:", err);
+    const body = await postJson<{ wav_base64: string }>("/export/wav", { musicxml });
+    blob = base64ToBlob(body.wav_base64, "audio/wav");
+  }
   return {
-    blob: base64ToBlob(body.wav_base64, "audio/wav"),
+    blob,
     filename: `${slug(projectTitle)}_${isoStamp()}.wav`,
     mime: "audio/wav",
   };

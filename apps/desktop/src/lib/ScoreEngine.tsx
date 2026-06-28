@@ -18,6 +18,9 @@ import {
 } from "react";
 
 import type { MixerSnapshot } from "../audio/Mixer";
+import { type PartInstrument, type SamplingMode, trackIdForPart } from "../audio/Engine";
+import { renderScoreToWav } from "../audio/offlineRender";
+import { resolveInstrument } from "../audio/Sampler";
 import { Player, type LoopRegion, type PlayerStatus } from "../audio/Player";
 import type { EditorState } from "../editor/EditorState";
 import {
@@ -122,6 +125,11 @@ interface ScoreEngineValue {
   loop: LoopRegion | null;
   clickEnabled: boolean;
   countInBars: number;
+  /* --- sampler bank (M3.5.1) -------------------------------------- */
+  samplingMode: SamplingMode;
+  setSamplingMode: (mode: SamplingMode) => void;
+  /** Non-null while instrument samples are loading: {done, total, label}. */
+  samplerLoad: { done: number; total: number; label: string } | null;
 
   /* --- agent diff slice (M1.4) ------------------------------------ */
   pendingDiff: ScoreDiff | null;
@@ -153,6 +161,8 @@ interface ScoreEngineValue {
   loadFromUrl: (url: string, filename?: string) => Promise<void>;
   play: () => void;
   stop: () => void;
+  /** Render the current score to a WAV Blob through the real sampler + mixer chain (M3.5.1 B3). */
+  renderWav: () => Promise<Blob>;
   transpose: (target_key: string) => Promise<void>;
   transposeRegion: (
     target: { target_key?: string; interval_name?: string },
@@ -262,6 +272,12 @@ export function ScoreEngineProvider({ children }: { children: React.ReactNode })
   const [loop, setLoopState] = useState<LoopRegion | null>(null);
   const [clickEnabled, setClickEnabledState] = useState(false);
   const [countInBars, setCountInBarsState] = useState(0);
+  // Sampler bank: "multi" = a distinct instrument per part; "piano-only" = low-RAM (M2 Air).
+  const [samplingMode, setSamplingModeState] = useState<SamplingMode>("multi");
+  // Coarse sampler-load progress for the loading indicator (null = idle/loaded).
+  const [samplerLoad, setSamplerLoad] = useState<{ done: number; total: number; label: string } | null>(
+    null,
+  );
 
   const playerRef = useRef<Player | null>(null);
   const opLogRef = useRef<OperationLogState>(new OperationLogState());
@@ -291,6 +307,55 @@ export function ScoreEngineProvider({ children }: { children: React.ReactNode })
     }
     refreshNoteIndex(score.musicxml);
   }, [score?.musicxml, refreshNoteIndex]);
+
+  /* --- per-part instruments (M3.5.1) -------------------------------- */
+
+  // The distinct parts of the loaded score, in order, with their instrument names.
+  // Drives both the multi-instrument sampler bank and the per-part mixer strips.
+  const scoreParts = useMemo<PartInstrument[]>(() => {
+    const seen = new Map<number, string>();
+    for (const n of scoreNotes) {
+      if (!seen.has(n.part_index)) {
+        seen.set(n.part_index, n.part_name?.trim() || `Part ${n.part_index + 1}`);
+      }
+    }
+    return [...seen.entries()]
+      .sort((a, b) => a[0] - b[0])
+      .map(([part_index, instrument_name]) => ({ part_index, instrument_name }));
+  }, [scoreNotes]);
+
+  useEffect(() => {
+    // 1. Feed instruments to the sampler bank (reloads on next play).
+    playerRef.current?.setParts(scoreParts);
+
+    // 2. Mirror the parts as mixer channel strips so solo/mute/fader work per part.
+    if (!score?.musicxml) {
+      // No score → collapse back to the single default piano strip.
+      setMixer((prev) =>
+        prev.tracks.length === 1 && prev.tracks[0]?.id === "piano"
+          ? prev
+          : { ...prev, tracks: [{ id: "piano", gain_db: 0, pan: 0, mute: false, solo: false }] },
+      );
+      return;
+    }
+    if (scoreParts.length === 0) return; // note index still loading; keep current strips
+
+    setMixer((prev) => {
+      const prevById = new Map(prev.tracks.map((t) => [t.id, t]));
+      const tracks = scoreParts.map((p) => {
+        const id = trackIdForPart(p.part_index);
+        const name = resolveInstrument(p.instrument_name).displayName;
+        const existing = prevById.get(id);
+        return existing
+          ? { ...existing, name }
+          : { id, name, gain_db: 0, pan: 0, mute: false, solo: false };
+      });
+      const unchanged =
+        prev.tracks.length === tracks.length &&
+        prev.tracks.every((t, i) => t.id === tracks[i].id && t.name === tracks[i].name);
+      return unchanged ? prev : { ...prev, tracks };
+    });
+  }, [scoreParts, score?.musicxml]);
 
   const resolveNoteForApi = useCallback(async (note: SelectedNote): Promise<SelectedNote> => {
     const local = resolveNoteForEdit(note, scoreNotesRef.current);
@@ -322,6 +387,8 @@ export function ScoreEngineProvider({ children }: { children: React.ReactNode })
     const player = new Player({
       onStatusChange: (status) => setPlayerStatus(status),
       onProgress: (pos) => setPositionSec(pos),
+      onLoadProgress: (done, total, label) =>
+        setSamplerLoad(done >= total ? null : { done, total, label }),
     });
     playerRef.current = player;
     return () => {
@@ -605,6 +672,23 @@ export function ScoreEngineProvider({ children }: { children: React.ReactNode })
     playerRef.current?.stop();
     setPositionSec(0);
   }, []);
+
+  const setSamplingMode = useCallback((mode: SamplingMode) => {
+    setSamplingModeState(mode);
+    playerRef.current?.setSamplingMode(mode);
+  }, []);
+
+  const renderWav = useCallback(async (): Promise<Blob> => {
+    const s = score;
+    if (!s) throw new Error("No score loaded.");
+    return renderScoreToWav({
+      notes: s.extracted.notes,
+      durationSec: s.extracted.duration_sec,
+      parts: scoreParts,
+      mixer,
+      mode: playerRef.current?.getSamplingMode() ?? "multi",
+    });
+  }, [score, scoreParts, mixer]);
 
   const playFrom = useCallback(
     async (seconds: number) => {
@@ -1555,10 +1639,14 @@ export function ScoreEngineProvider({ children }: { children: React.ReactNode })
       loop,
       clickEnabled,
       countInBars,
+      samplingMode,
+      setSamplingMode,
+      samplerLoad,
       loadFromXml,
       loadFromUrl,
       play,
       stop,
+      renderWav,
       transpose,
       transposeRegion,
       sendChat,
@@ -1643,6 +1731,7 @@ export function ScoreEngineProvider({ children }: { children: React.ReactNode })
       loadFromUrl,
       play,
       stop,
+      renderWav,
       transpose,
       transposeRegion,
       sendChat,
@@ -1674,6 +1763,9 @@ export function ScoreEngineProvider({ children }: { children: React.ReactNode })
       loop,
       clickEnabled,
       countInBars,
+      samplingMode,
+      setSamplingMode,
+      samplerLoad,
       setTrackGain,
       setTrackPan,
       setTrackMute,

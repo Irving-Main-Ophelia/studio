@@ -4,6 +4,15 @@
 > **Duration:** ~4 months part-time.
 > **Outcome:** The maintainer plays guitar and watches the score build. Orchestration changes between idiom packs (Western chamber → orchestra → Persian Radif → Arabic Maqam → Hindustani → Chinese classical). Agent grows from 10 to 30 tools.
 
+> ⚠️ **Reconciliation note (June 27, 2026).** Some of this phase's DoD items were **reassigned** to
+> the new numbered phases (3.5, 4–8) created from the DAW reference study. See
+> [`../reference-daws/RECONCILIATION.md`](../reference-daws/RECONCILIATION.md) for the authoritative
+> per-item crosswalk. In short: **VST3 host bridge → Phase 6**; **world-music samples/tuning →
+> Phase 7**; the **live-notation incremental render → Phase 4**; `record.*` **tools → Phase 5**. The
+> guitar→MIDI capture, orchestration *agent*, MP3 reverse-engineering, and visualizations **stay
+> here**, but now **depend on** Phases 3.5/4/5. Execution order is dependency-driven (see the doc),
+> not strictly numeric. This banner is non-destructive; items below are unchanged pending Decision B.
+
 ---
 
 ## 2.1 Goal

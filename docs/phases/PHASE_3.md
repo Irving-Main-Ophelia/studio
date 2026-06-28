@@ -4,6 +4,14 @@
 > **Duration:** ~6 months part-time.
 > **Outcome:** Composer-specific style transfer is live. The agent becomes a true multi-agent co-composer. Voice arrives (if the maintainer still wants it). Stockhausen reaches a personal v1.0.
 
+> ⚠️ **Reconciliation note (June 27, 2026).** Two of this phase's DoD items were **reassigned** to the
+> new numbered phases from the DAW reference study. See
+> [`../reference-daws/RECONCILIATION.md`](../reference-daws/RECONCILIATION.md) for the authoritative
+> crosswalk. In short: **practice coach (Pillar 10) → Phase 8**; **MIDI-DDSP expressive render →
+> Phase 7** (recommended — Decision C). Composer adapters, multi-agent, production exports, voice, and
+> the eval harness **stay here**. This banner is non-destructive; items below are unchanged pending
+> Decision B.
+
 ---
 
 ## 3.1 Goal

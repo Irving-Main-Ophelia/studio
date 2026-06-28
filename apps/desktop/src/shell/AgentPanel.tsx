@@ -194,8 +194,24 @@ function ChatTurnView({ turn }: { turn: ChatTurn }) {
   );
 }
 
+/**
+ * An honest stub (ADR-0017): an advertised tool whose real implementation is not
+ * present yet returns `{ stub: true, reason }` (agent tools) or `{ status: "stub",
+ * reason }` (routes). We must never render that as a success — surface the reason.
+ */
+function readStub(output: unknown): { reason: string } | null {
+  if (!output || typeof output !== "object") return null;
+  const o = output as { stub?: unknown; status?: unknown; reason?: unknown };
+  const isStub = o.stub === true || o.status === "stub";
+  if (!isStub) return null;
+  return { reason: typeof o.reason === "string" ? o.reason : "Not available yet." };
+}
+
 function ToolCallCard({ call }: { call: ToolCallRecord }) {
+  const stub = call.error ? null : readStub(call.output);
+
   const summary = (() => {
+    if (stub) return "not available";
     if (call.tool === "theory_analyze_key") {
       const out = call.output as { key?: string; mode?: string; confidence?: number } | undefined;
       if (out?.key) return `${out.key} ${out.mode} (conf ${Math.round((out.confidence ?? 0) * 100)}%)`;
@@ -210,20 +226,20 @@ function ToolCallCard({ call }: { call: ToolCallRecord }) {
   // Render namespaces as dots for human reading: "theory.analyze_key".
   const pretty = call.tool.replace(/_/, ".");
 
+  const tone = call.error
+    ? "border-danger/40 bg-danger/10 text-danger"
+    : stub
+      ? "border-neon-amber/40 bg-neon-amber/5 text-neon-amber"
+      : "border-neon-violet/30 bg-neon-violet/5 text-neon-violet";
+
   return (
-    <div
-      className={[
-        "rounded border px-2 py-1 text-[11px]",
-        call.error
-          ? "border-danger/40 bg-danger/10 text-danger"
-          : "border-neon-violet/30 bg-neon-violet/5 text-neon-violet",
-      ].join(" ")}
-    >
+    <div className={["rounded border px-2 py-1 text-[11px]", tone].join(" ")}>
       <div className="flex items-center gap-1.5">
         <Wrench size={10} />
         <span className="font-mono">{pretty}</span>
-        <span className="ml-auto text-zinc-400">{summary}</span>
+        <span className="ml-auto">{summary}</span>
       </div>
+      {stub && <p className="mt-1 text-[10px] text-neon-amber/80">Not available yet — {stub.reason}</p>}
     </div>
   );
 }

@@ -25,9 +25,18 @@ The product is *not* fully Pro Tools yet — recording, world-music orchestratio
 
 ## 1.2 Success criteria (Definition of Done)
 
+> **Reconciled June 27, 2026 (Phase 3.5, M3.5.0 truth pass).** Three tools that this
+> section once described as Phase-1 stubs are **shipped and real** in
+> `backend/agent/app/agent_tools.py`: `theory.analyze_form` (cadence-based phrase/section
+> detection, ≈L146), `score.reharmonize` (Claude-assisted chord substitution, ≈L466), and
+> `score.add_section` (Claude + music21 generation, ≈L539). The bullets below have been
+> corrected; the matching `docs/parking-lot.md` entries are moved to its "Shipped" note.
+> The remaining honest stubs (`audio_*`, `export_stems`/`export_minus_one`) follow the
+> tool-honesty convention codified in [ADR-0017](../adr/0017-tool-honesty-convention.md).
+
 - [x] **Pillar 2 (Transposition) — feature complete.** Whole-piece and region/part transposition both ship: `stockhausen_theory.transpose` and `transpose_region` (M1.3) handle enharmonic respelling via `music21` and emit instrument-range warnings as structured diagnostics. The desktop app exposes both via the top-bar Transpose menu and the new Region-aware modal (`apps/desktop/src/editor/TransposeDialog.tsx`). Audio-domain tempo-without-pitch lives in the Rubber Band FFI scaffold (ADR-0010); the C++ bridge is deferred to M1.5/Phase 2.
 - [x] **Pillar 5 (Playback) — feature complete.** Loop, count-in, click track, solo / mute, play-from-cursor are live. Tempo-without-pitch ships as a Rust FFI scaffold today (`rubberband_stretch` Tauri command, no-op pass-through); the GPL C++ bridge is documented in ADR-0010 and tracked in `docs/parking-lot.md`. `sfizz.wasm` multi-instrument playback gates on the maintainer downloading VSCO 2 CE.
-- [x] **Pillar 4 (partial) — first-draft generation.** The agent's `score.add_section` tool is wired through the ScoreDiff envelope and accepts a `plan` JSON object today; the body ships as a Phase-1 stub that returns an empty diff with a `phase1_stub` warning, so the tool surface is stable while the Anticipatory Music Transformer / Moonbeam integration on Modal lands in Phase 2 (`docs/parking-lot.md`).
+- [x] **Pillar 4 (partial) — first-draft generation.** The agent's `score.add_section` tool is wired through the ScoreDiff envelope and accepts a `plan` JSON object. **Shipped real (corrected June 27, 2026):** the body uses Claude + music21 (`app/generator.py`) to generate a new section and appends it to the score, with a typed `generation_failed` warning on fallback (not the empty `phase1_stub` this bullet previously claimed). A heavier Anticipatory Music Transformer / Moonbeam path on Modal remains a possible Phase-2 upgrade, but the tool is not a stub.
 - [x] **Pillar 7 (partial) — chat agent with 10 tools.** Every score-mutating tool returns a `ScoreDiff` (ADR-0012); the maintainer accepts, rejects, or refines via the diff overlay. Planner tools (`theory.analyze_form`, `score.add_section`, `score.reharmonize`) escalate to Opus 4.7; everything else stays on Sonnet 4.6. No voice in Phase 1.
 - [x] **Pillar 8 — Theory Tutor.** Tutor tab in the right rail (ADR-0014) calls `POST /theory/explain` and renders Roman numerals, cadences, and voice-leading intervals for the selected measure range.
 - [x] **Notation editor v1.** Note entry (computer keyboard grammar, mouse via OSMD selection, MIDI keyboard hooks ready), measure ops (append measure), articulations (staccato/accent/marcato/tenuto/fermata), dynamics (`pp`–`ff`), ties. Slurs, hairpins, lasso selection, and cut/paste deferred to M1.3 (theory) and Phase 2 (capture mode).
@@ -53,7 +62,7 @@ Phase 1 builds **on top of** Phase 0; it does not redo the foundations. Concrete
 | Tauri 2 shell + React 19 + Vite 7 + Tailwind 3 + shadcn | Working; `pnpm tauri:dev` opens the splash + 3-pane shell | **Keep.** Extend the shell with note-input surfaces and mixer rail. |
 | Design tokens (`src/styles/tokens.css`, `globals.css`) | Obsidian + neon palette wired into Tailwind | **Keep + expand.** Add motion variants, score themes (Parchment / Night), command-palette styles. |
 | Score view (`src/notation/ScoreView.tsx`, OSMD 1.9.9) | Renders fixture MusicXML | **Wrap, don't replace.** OSMD is display-only; edits mutate MusicXML via local FastAPI + music21, then `osmd.load` re-render (ADR-0015). `EditLayer` handles pointer hit-test, menu, pitch drag. |
-| Audio (`src/audio/Player.ts`, `smplr` + `SplendidGrandPiano`) | Plays a flat note list at the AudioContext clock | **Promote behind the same interface.** Phase 1 swaps the implementation to `sfizz.wasm` for multi-instrument playback, but the `Player.play / .stop / .preload` surface stays. See ADR-0005. |
+| Audio (`src/audio/Player.ts`, `smplr` + `SplendidGrandPiano`) | Plays a flat note list at the AudioContext clock | **Promote behind the same interface.** The `Player.play / .stop / .preload` surface stays; the implementation swaps to `sfizz.wasm` for multi-instrument playback. *Reconciled June 27, 2026: this swap did **not** land in Phase 1 — `Player.ts` still uses `smplr`. It is now Phase 3.5 Workstream B (M3.5.1), behind the unchanged `Player` surface. See ADR-0005/0010.* |
 | Audio meter (CPAL → `audio:meter` Tauri event) | Working | **Keep.** Already meets the bottom-rail need; no changes needed for Phase 1. |
 | MIDI hook (`src/lib/useMidi.ts` via Web MIDI) | Lists devices + tails events | **Extend.** Turn into a real note-entry source feeding the notation editor cursor. |
 | Score engine context (`src/lib/ScoreEngine.tsx`) | Holds score, player, chat | **Split.** Add slices for `Project`, `Selection`, `OperationLog`, `Mixer`, `Agent` — keep them on the same Provider. |

@@ -77,6 +77,28 @@ def create_app() -> FastAPI:
         allow_credentials=False,
     )
 
+    # ── Router registry (router → phase → real|stub) ──────────────────────────
+    # Ground truth as of the M3.5.0 truth pass (June 27, 2026). Several routers are
+    # registered ahead of their phase; verified against the code, all are REAL — the
+    # only honest stubs are two endpoints inside `export` (see notes). "real" means it
+    # does the work locally; "stub" means it returns {"status":"stub",...} per ADR-0017.
+    #   health        infra     real
+    #   transpose     Phase 1   real
+    #   score         Phase 1   real
+    #   score_edit    Phase 1   real   (M1.7 — voice-aware list_notes)
+    #   theory        Phase 1   real
+    #   chat          Phase 1   real   (Claude tool-use; tools in agent_tools.py)
+    #   export        Phase 1   real, EXCEPT /export/minus-one + /export/stems = honest
+    #                           stubs (need sfizz.wasm render — Phase 3.5 B); /export/wav
+    #                           is a real sine-bank fallback pending the offline render.
+    #   generate      Phase 2   real   (Claude + music21 subprocess)
+    #   orchestration Phase 2   real
+    #   audio         Phase 2   real   (Basic Pitch + GAPS AMT, local 3.12 venv; 503 if absent)
+    #   practice      Phase 3   real   (compare_performance)
+    #   style         Phase 3   real   (Claude-based; 503 without API key)
+    #   multi_agent   Phase 3   real   (run_panel — 4-specialist panel)
+    # The remaining honest stubs are agent tools (audio_stem_separate / audio_transcribe /
+    # score_import_audio), which return {"stub": true, ...}. See ADR-0017.
     app.include_router(health.router)
     app.include_router(transpose.router)
     app.include_router(score.router)

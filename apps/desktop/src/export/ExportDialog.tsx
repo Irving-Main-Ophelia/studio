@@ -87,7 +87,7 @@ export function ExportDialog({ open, onClose }: ExportDialogProps): React.ReactE
           art = await exportMidi(score.musicxml, title);
           break;
         case "wav":
-          art = await exportWav(score.musicxml, title);
+          art = await exportWav(() => engine.renderWav(), score.musicxml, title);
           break;
         case "pdf":
           art = await exportPdf(score.musicxml, title);

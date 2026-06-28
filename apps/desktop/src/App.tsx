@@ -5,6 +5,7 @@ import { Shell } from "./shell/Shell";
 import { NorthStar } from "./shell/NorthStar";
 import { ScoreEngineProvider } from "./lib/ScoreEngine";
 import { isTauri } from "./lib/tauri";
+import { APP_NAME, APP_PHASE, APP_VERSION } from "./lib/appInfo";
 
 interface AppInfo {
   name: string;
@@ -12,7 +13,10 @@ interface AppInfo {
   phase: string;
 }
 
-const BROWSER_INFO: AppInfo = { name: "Stockhausen", version: "0.0.1", phase: "0" };
+/** The native `app_info` command returns name + version; phase is owned by the WebView. */
+type NativeAppInfo = { name: string; version: string };
+
+const BROWSER_INFO: AppInfo = { name: APP_NAME, version: APP_VERSION, phase: APP_PHASE };
 
 /**
  * The app entry. Holds bootstrap state and renders either:
@@ -26,11 +30,14 @@ export function App() {
 
   useEffect(() => {
     const start = Date.now();
-    const p = isTauri()
-      ? invoke<AppInfo>("app_info").catch((err) => {
-          console.error("failed to load app_info from native core:", err);
-          return BROWSER_INFO;
-        })
+    const p: Promise<AppInfo> = isTauri()
+      ? invoke<NativeAppInfo>("app_info")
+          // Native owns name + version (the built binary); phase comes from appInfo.ts.
+          .then((native) => ({ name: native.name, version: native.version, phase: APP_PHASE }))
+          .catch((err) => {
+            console.error("failed to load app_info from native core:", err);
+            return BROWSER_INFO;
+          })
       : Promise.resolve(BROWSER_INFO);
 
     void p.then((value) => {

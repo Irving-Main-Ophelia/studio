@@ -18,6 +18,8 @@
 
 export interface MixerTrackConfig {
   id: string;
+  /** Optional display label for the channel strip (e.g. "Violin"). Falls back to the id. */
+  name?: string;
   /** dB; mapped to a linear gain in [0, 2]. */
   gain_db: number;
   /** [-1, 1]. */
@@ -61,12 +63,14 @@ interface InternalTrack {
 }
 
 export class Mixer {
-  private readonly ctx: AudioContext;
+  // BaseAudioContext so the same mixer graph drives both the live AudioContext
+  // and the OfflineAudioContext used for WAV export (M3.5.1 B3).
+  private readonly ctx: BaseAudioContext;
   private readonly master: GainNode;
   private readonly tracks = new Map<string, InternalTrack>();
   private masterConfig: MixerMasterConfig = { ...DEFAULT_MASTER };
 
-  constructor(context: AudioContext) {
+  constructor(context: BaseAudioContext) {
     this.ctx = context;
     this.master = new GainNode(context, { gain: dbToLinear(this.masterConfig.gain_db) });
     this.master.connect(context.destination);

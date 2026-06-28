@@ -8,6 +8,25 @@ and a one-line note about why it was deferred.
 
 ---
 
+## Shipped (no longer deferred) — reconciled June 27, 2026 (M3.5.0 truth pass)
+
+These were logged here as deferred, but the code shipped them ahead of the doc.
+Verified in `backend/agent/app/agent_tools.py`; kept here only as a record so the
+parking lot tells the truth.
+
+- **`score.reharmonize` — SHIPPED.** Claude-assisted chord substitution
+  (`score_reharmonize`, ≈L466) applies secondary dominants / borrowed chords / modal
+  interchange to inner voices while preserving the melody. Returns a typed
+  `no_substitutions` `TheoryWarning` when nothing changes — not a silent empty diff.
+- **`score.add_section` — SHIPPED.** Real generation via Claude + music21
+  (`score_add_section`, ≈L539 → `app/generator.py`); the new section is appended to the
+  score, with a `generation_failed` warning on fallback. The AMT/Moonbeam-on-Modal path is
+  an optional future upgrade, not a blocker.
+- **`theory.analyze_form` — SHIPPED.** Real cadence-based phrase detection + A/B/A′ section
+  grouping (`theory_analyze_form`, ≈L146). No longer returns a single `undivided` section.
+
+---
+
 - **Mouse note-entry on imported scores (M1.7, partially built — BLOCKED).** `EditLayer`, hit-test, context menu, pitch drag, and `/score/edit/note/resolve` ship (ADR-0015), but the maintainer reports the staff still does not update after edits on real imports (June 2026). Keyboard + MIDI cover scratch composition; imported-score mouse edit must be fixed before closing M1.7.
 - **Lasso & range selection (M1.1, deferred).** Multi-note selection,
   cut/copy/paste, all-of-pitch-class. Belongs in the same OSMD-overlay PR as
@@ -21,28 +40,23 @@ and a one-line note about why it was deferred.
   needs a voice selector — Phase 2.
 - **Cross-staff beaming (M1.1, deferred).** Belongs with multi-voice grand
   staff piano UX.
-- **sfizz.wasm AudioWorklet sampler (M1.2, deferred).** The engine swap is
-  abstracted; ships when the maintainer downloads VSCO 2 CE.
+- **sfizz.wasm AudioWorklet sampler (M1.2 → M3.5.1: superseded for now by a Soundfont bank).**
+  M3.5.1 shipped multi-instrument sound via a `Sampler` interface (`audio/Sampler.ts`) with smplr
+  `Soundfont`/`Versilian` voices + `Engine.ts`, behind the unchanged `Player` surface. The literal
+  **sfizz.wasm + VSCO 2 CE** path (highest fidelity) remains deferred: it needs an external
+  Emscripten build of sfizz + a 3–4 GB local sample download. It is scaffolded as `SfizzSampler` and
+  drops in behind the same interface. See `docs/phases/PHASE_3_5.md` §3.5.4 B.
 - **Rubber Band GPL FFI implementation (M1.2, deferred).** Scaffold + Tauri
   command shipped. Real C++ link drops in behind the same surface.
 - **Per-track output meters in the mixer (M1.2, deferred).** Need AnalyserNodes
   per channel; slipping to M1.5 polish.
-- **`score.reharmonize` real implementation (M1.4, deferred to Phase 2).** Today
-  ships as an empty-diff stub with a `phase1_stub` warning. The tool surface +
-  ScoreDiff contract is locked (ADR-0012), so the body swap is local. Needs
-  chord-substitution + voice-leading rewrite.
-- **`score.add_section` generator integration (M1.4, deferred to Phase 2).** Same
-  shape: stub today, Anticipatory Music Transformer / Moonbeam integration on
-  Modal arrives in Phase 2 (NORTH_STAR §6 roadmap).
-- **`theory.analyze_form` real form analysis (M1.4, deferred to Phase 2).** Today
-  returns a single `undivided` section. Real period/phrase/section detection
-  needs a dedicated analyzer + ground-truth fixtures.
 - **Stale-diff UI prompt (M1.4, partial).** The diff already carries
   `base_score_hash`; the M1.4 UI does not yet detect a mismatch and prompt
   "this proposal is based on an older version". Land in M1.5 polish.
-- **In-app WAV render via `OfflineAudioContext` (M1.5, deferred).** Backend
-  fallback ships today (sine-bank). The high-fidelity render through the
-  Mixer + sampler chain lands once `sfizz.wasm` is in place.
+- **In-app WAV render via `OfflineAudioContext` (M1.5 → SHIPPED in M3.5.1).** `audio/offlineRender.ts`
+  renders through the real `Engine` (samplers) + `Mixer` on an `OfflineAudioContext` and encodes via
+  smplr `audioBufferToWav`. The backend sine-bank (`/export/wav`) is now only a labelled emergency
+  fallback in `export/exporters.ts`.
 - **Self-hosted typography pass (M1.5, deferred).** Geist Sans / JetBrains
   Mono / Cormorant Garamond / Bravura need to live under
   `apps/desktop/public/fonts/`; the visual design is functional today with

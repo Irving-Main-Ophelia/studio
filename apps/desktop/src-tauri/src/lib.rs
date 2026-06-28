@@ -13,11 +13,14 @@ mod rubberband;
 
 use audio::AudioMeter;
 
+/// Native app identity. `name` + `version` are authoritative for the built binary
+/// (version from `Cargo.toml`). The roadmap **phase** is intentionally NOT here —
+/// it lives in one place, the WebView's `src/lib/appInfo.ts` (`APP_PHASE`), so the
+/// phase string never drifts between Rust and TS. Reconciled June 27, 2026 (M3.5.0).
 #[derive(Serialize)]
 pub struct AppInfo {
     pub name: &'static str,
     pub version: &'static str,
-    pub phase: &'static str,
 }
 
 #[tauri::command]
@@ -25,7 +28,6 @@ fn app_info() -> AppInfo {
     AppInfo {
         name: "Stockhausen",
         version: env!("CARGO_PKG_VERSION"),
-        phase: "1",
     }
 }
 
