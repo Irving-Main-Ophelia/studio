@@ -11,10 +11,13 @@ they can be displayed inline in the editor.
 
 from __future__ import annotations
 
+import logging
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field, field_validator
+
+logger = logging.getLogger(__name__)
 
 from app.tools.score_edit import (
     ALLOWED_ARTICULATIONS,
@@ -202,6 +205,19 @@ def _bad(detail: str) -> HTTPException:
     return HTTPException(status_code=400, detail=detail)
 
 
+def _route_error(exc: Exception) -> HTTPException:
+    """Convert any tool exception to a 400 with a human-readable message.
+
+    ValueError → expected bad input; log at WARNING.
+    Anything else → unexpected; log full traceback at ERROR so we can debug.
+    """
+    if isinstance(exc, ValueError):
+        logger.warning("score-edit bad request: %s", exc)
+    else:
+        logger.error("score-edit unexpected error: %s", exc, exc_info=True)
+    return HTTPException(status_code=400, detail=str(exc))
+
+
 @router.post("/note/insert", response_model=InsertNoteResponse)
 def route_insert_note(req: InsertNoteIn) -> InsertNoteResponse:
     try:
@@ -216,8 +232,8 @@ def route_insert_note(req: InsertNoteIn) -> InsertNoteResponse:
             replace=req.replace,
         )
         return InsertNoteResponse(**result)
-    except ValueError as exc:
-        raise _bad(str(exc)) from exc
+    except Exception as exc:
+        raise _route_error(exc) from exc
 
 
 @router.post("/note/rest", response_model=InsertResponse)
@@ -232,8 +248,8 @@ def route_insert_rest(req: InsertRestIn) -> InsertResponse:
             voice=req.voice,
         )
         return InsertResponse(**result)
-    except ValueError as exc:
-        raise _bad(str(exc)) from exc
+    except Exception as exc:
+        raise _route_error(exc) from exc
 
 
 @router.post("/note/remove", response_model=MusicxmlOnly)
@@ -248,8 +264,8 @@ def route_remove_note(req: RemoveNoteIn) -> MusicxmlOnly:
                 voice=req.voice,
             )
         )
-    except ValueError as exc:
-        raise _bad(str(exc)) from exc
+    except Exception as exc:
+        raise _route_error(exc) from exc
 
 
 @router.post("/articulation/toggle", response_model=ToggleResponse)
@@ -265,8 +281,8 @@ def route_articulation(req: ArticulationIn) -> ToggleResponse:
                 voice=req.voice,
             )
         )
-    except ValueError as exc:
-        raise _bad(str(exc)) from exc
+    except Exception as exc:
+        raise _route_error(exc) from exc
 
 
 @router.post("/tie/set", response_model=MusicxmlOnly)
@@ -282,8 +298,8 @@ def route_tie(req: TieIn) -> MusicxmlOnly:
                 voice=req.voice,
             )
         )
-    except ValueError as exc:
-        raise _bad(str(exc)) from exc
+    except Exception as exc:
+        raise _route_error(exc) from exc
 
 
 @router.post("/dynamic/set", response_model=MusicxmlOnly)
@@ -298,24 +314,24 @@ def route_dynamic(req: DynamicIn) -> MusicxmlOnly:
                 dynamic=req.dynamic,
             )
         )
-    except ValueError as exc:
-        raise _bad(str(exc)) from exc
+    except Exception as exc:
+        raise _route_error(exc) from exc
 
 
 @router.post("/measure/append", response_model=AppendMeasureResponse)
 def route_append_measure(req: AppendMeasureIn) -> AppendMeasureResponse:
     try:
         return AppendMeasureResponse(**append_measure(req.musicxml, part_index=req.part_index))
-    except ValueError as exc:
-        raise _bad(str(exc)) from exc
+    except Exception as exc:
+        raise _route_error(exc) from exc
 
 
 @router.post("/notes/list", response_model=ListNotesResponse)
 def route_list_notes(req: ListNotesIn) -> ListNotesResponse:
     try:
         return ListNotesResponse(**list_notes(req.musicxml))
-    except ValueError as exc:
-        raise _bad(str(exc)) from exc
+    except Exception as exc:
+        raise _route_error(exc) from exc
 
 
 class ResolveNoteIn(BaseModel):
@@ -334,8 +350,8 @@ def route_resolve_note(req: ResolveNoteIn) -> ListedNote:
             pitch=req.pitch,
             beat_hint=req.beat_hint,
         ))
-    except ValueError as exc:
-        raise _bad(str(exc)) from exc
+    except Exception as exc:
+        raise _route_error(exc) from exc
 
 
 @router.post("/note/info", response_model=NoteInfoResponse)
@@ -350,8 +366,8 @@ def route_note_info(req: RemoveNoteIn) -> NoteInfoResponse:
                 voice=req.voice,
             )
         )
-    except ValueError as exc:
-        raise _bad(str(exc)) from exc
+    except Exception as exc:
+        raise _route_error(exc) from exc
 
 
 @router.post("/note/duration", response_model=MusicxmlOnly)
@@ -367,8 +383,8 @@ def route_change_duration(req: ChangeDurationIn) -> MusicxmlOnly:
                 voice=req.voice,
             )
         )
-    except ValueError as exc:
-        raise _bad(str(exc)) from exc
+    except Exception as exc:
+        raise _route_error(exc) from exc
 
 
 @router.post("/note/respell", response_model=RespellResponse)
@@ -383,8 +399,8 @@ def route_respell(req: RemoveNoteIn) -> RespellResponse:
                 voice=req.voice,
             )
         )
-    except ValueError as exc:
-        raise _bad(str(exc)) from exc
+    except Exception as exc:
+        raise _route_error(exc) from exc
 
 
 @router.post("/note/pitch", response_model=PitchResponse)
@@ -400,8 +416,8 @@ def route_change_pitch(req: ChangePitchIn) -> PitchResponse:
                 voice=req.voice,
             )
         )
-    except ValueError as exc:
-        raise _bad(str(exc)) from exc
+    except Exception as exc:
+        raise _route_error(exc) from exc
 
 
 @router.post("/note/transpose-semitones", response_model=PitchResponse)
@@ -417,8 +433,8 @@ def route_transpose_semitones(req: TransposeSemitonesIn) -> PitchResponse:
                 voice=req.voice,
             )
         )
-    except ValueError as exc:
-        raise _bad(str(exc)) from exc
+    except Exception as exc:
+        raise _route_error(exc) from exc
 
 
 @router.post("/key-signature/set", response_model=KeySignatureResponse)
@@ -427,5 +443,5 @@ def route_set_key_signature(req: KeySignatureIn) -> KeySignatureResponse:
         return KeySignatureResponse(
             **set_key_signature(req.musicxml, tonic=req.tonic, mode=req.mode)
         )
-    except ValueError as exc:
-        raise _bad(str(exc)) from exc
+    except Exception as exc:
+        raise _route_error(exc) from exc

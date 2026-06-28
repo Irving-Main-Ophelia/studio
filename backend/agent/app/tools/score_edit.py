@@ -33,7 +33,7 @@ from music21 import note as m21note
 from music21 import pitch as m21pitch
 from music21 import tie as m21tie
 
-from .theory import _parse
+from .theory import _parse as _parse_raw
 
 TieType = Literal["start", "stop", "continue", "none"]
 
@@ -55,9 +55,45 @@ ALLOWED_ARTICULATIONS: dict[str, type[m21base.Music21Object]] = {
 ALLOWED_DYNAMICS: tuple[str, ...] = ("pp", "p", "mp", "mf", "f", "ff", "ppp", "fff")
 
 
+def _coerce_duration_types(score: stream.Score) -> None:
+    """Fix notes/rests with missing duration types that music21 cannot export.
+
+    music21 can parse MusicXML notes whose <type> is absent but cannot
+    round-trip them. recurse() visits every sub-stream (including Voice
+    objects inside multi-voice measures) so no element is skipped.
+
+    Called both at parse time (pre-fix) and as a _serialise fallback.
+    """
+    for el in score.recurse().notesAndRests:
+        dtype = el.duration.type
+        if not dtype or dtype in ("zero", ""):
+            ql = float(el.duration.quarterLength)
+            if ql > 0:
+                el.duration.type = m21duration.Duration(quarterLength=ql).type
+            else:
+                el.duration.type = "eighth"
+
+
+def _parse(musicxml: str) -> stream.Score:
+    """Parse MusicXML and immediately normalise unexportable duration types.
+
+    Wraps the theory._parse with a pre-fix so that every score that enters
+    the edit pipeline is guaranteed to be round-trippable before any edit.
+    """
+    score = _parse_raw(musicxml)
+    _coerce_duration_types(score)
+    return score
+
+
 def _serialise(score: stream.Score) -> str:
     """music21 only serialises through a file. Read it back and return."""
-    path = score.write("musicxml")  # type: ignore[no-untyped-call]
+    try:
+        path = score.write("musicxml")  # type: ignore[no-untyped-call]
+    except Exception:
+        # Belt-and-suspenders: coerce again in case the edit introduced new
+        # elements (e.g. replacement Note for a Chord) with missing types.
+        _coerce_duration_types(score)
+        path = score.write("musicxml")  # type: ignore[no-untyped-call]
     with open(path, encoding="utf-8") as fh:
         return fh.read()
 
@@ -89,9 +125,16 @@ def _find_voice_or_measure(measure: stream.Measure, voice_id: int | None) -> str
     if not voices:
         return measure
     for v in voices:
-        if int(v.id) == voice_id:
+        if _voice_id(v) == voice_id:
             return cast("stream.Stream[Any]", v)
     raise ValueError(f"measure has no voice {voice_id}; voices: {[v.id for v in voices]}")
+
+
+def _voice_id(v: stream.Voice) -> int | None:
+    try:
+        return int(v.id)
+    except (ValueError, TypeError):
+        return None
 
 
 def _find_note_at(
@@ -101,6 +144,11 @@ def _find_note_at(
 ) -> m21note.GeneralNote | None:
     """Look up the note or rest whose offset is closest to ``beat_offset``."""
     candidates = list(container.notesAndRests)
+    # Multi-voice measures store notes inside Voice sub-streams; notesAndRests
+    # on the Measure itself returns [] in that case.
+    if not candidates and isinstance(container, stream.Measure):
+        for v in container.voices:
+            candidates.extend(list(v.notesAndRests))
     if not candidates:
         return None
     best: tuple[float, m21note.GeneralNote] | None = None
@@ -571,35 +619,42 @@ def list_notes(musicxml: str) -> dict[str, Any]:
     for part_idx, part in enumerate(score.parts):
         part_name = str(getattr(part, "partName", None) or f"Part {part_idx + 1}")
         for measure in part.getElementsByClass(stream.Measure):
-            for el in measure.notesAndRests:
-                if isinstance(el, m21note.Note):
-                    out.append(
-                        {
-                            "part_index": part_idx,
-                            "measure_number": int(measure.number),
-                            "beat_offset": float(el.offset),
-                            "voice": None,
-                            "part_name": part_name,
-                            "pitch": el.pitch.nameWithOctave,
-                            "midi": int(el.pitch.midi),
-                            "duration_quarters": float(el.duration.quarterLength),
-                        }
-                    )
-                elif isinstance(el, m21chord.Chord):
-                    pitches = "-".join(p.nameWithOctave for p in el.pitches)
-                    top = el.sortAscending().pitches[-1] if el.pitches else None
-                    out.append(
-                        {
-                            "part_index": part_idx,
-                            "measure_number": int(measure.number),
-                            "beat_offset": float(el.offset),
-                            "voice": None,
-                            "part_name": part_name,
-                            "pitch": pitches,
-                            "midi": int(top.midi) if top is not None else None,
-                            "duration_quarters": float(el.duration.quarterLength),
-                        }
-                    )
+            voices = list(measure.voices)
+            # When MusicXML has <backup> elements, music21 stores notes inside
+            # Voice sub-streams; measure.notesAndRests returns [] in that case.
+            sources: list[tuple[stream.Stream[Any], int | None]] = (
+                [(v, _voice_id(v)) for v in voices] if voices else [(measure, None)]
+            )
+            for container, voice_id in sources:
+                for el in container.notesAndRests:
+                    if isinstance(el, m21note.Note):
+                        out.append(
+                            {
+                                "part_index": part_idx,
+                                "measure_number": int(measure.number),
+                                "beat_offset": float(el.offset),
+                                "voice": voice_id,
+                                "part_name": part_name,
+                                "pitch": el.pitch.nameWithOctave,
+                                "midi": int(el.pitch.midi),
+                                "duration_quarters": float(el.duration.quarterLength),
+                            }
+                        )
+                    elif isinstance(el, m21chord.Chord):
+                        pitches = "-".join(p.nameWithOctave for p in el.pitches)
+                        top = el.sortAscending().pitches[-1] if el.pitches else None
+                        out.append(
+                            {
+                                "part_index": part_idx,
+                                "measure_number": int(measure.number),
+                                "beat_offset": float(el.offset),
+                                "voice": voice_id,
+                                "part_name": part_name,
+                                "pitch": pitches,
+                                "midi": int(top.midi) if top is not None else None,
+                                "duration_quarters": float(el.duration.quarterLength),
+                            }
+                        )
     return {"notes": out}
 
 

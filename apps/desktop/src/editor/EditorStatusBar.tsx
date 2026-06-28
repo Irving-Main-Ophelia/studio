@@ -26,7 +26,7 @@ function durationLabel(q: number): { glyph: string; name: string } {
 
 export function EditorStatusBar() {
   const engine = useScoreEngine();
-  if (!engine.project) return null;
+  if (!engine.score) return null;
   const e = engine.editor;
   const sel = engine.selection.note;
   const label = durationLabel(e.duration_quarters);

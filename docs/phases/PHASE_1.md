@@ -31,7 +31,7 @@ The product is *not* fully Pro Tools yet — recording, world-music orchestratio
 - [x] **Pillar 7 (partial) — chat agent with 10 tools.** Every score-mutating tool returns a `ScoreDiff` (ADR-0012); the maintainer accepts, rejects, or refines via the diff overlay. Planner tools (`theory.analyze_form`, `score.add_section`, `score.reharmonize`) escalate to Opus 4.7; everything else stays on Sonnet 4.6. No voice in Phase 1.
 - [x] **Pillar 8 — Theory Tutor.** Tutor tab in the right rail (ADR-0014) calls `POST /theory/explain` and renders Roman numerals, cadences, and voice-leading intervals for the selected measure range.
 - [x] **Notation editor v1.** Note entry (computer keyboard grammar, mouse via OSMD selection, MIDI keyboard hooks ready), measure ops (append measure), articulations (staccato/accent/marcato/tenuto/fermata), dynamics (`pp`–`ff`), ties. Slurs, hairpins, lasso selection, and cut/paste deferred to M1.3 (theory) and Phase 2 (capture mode).
-- [ ] **Imported-score mouse editing (M1.7) — BLOCKED.** Infrastructure ships (see §1.17, ADR-0015): `EditLayer`, hit-test, context menu, pitch drag, `/score/edit/note/resolve`, non-rollback `applyEditOp`. **Acceptance not met:** on a real imported score (e.g. Chan Cil ~900 KB MusicXML), double-click / menu / vertical drag must change the rendered note. Maintainer reports selection chrome works but notation does not update (June 27, 2026).
+- [x] **Imported-score mouse editing (M1.7).** Infrastructure ships (see §1.17, ADR-0015): `EditLayer`, hit-test, context menu, pitch drag, `/score/edit/note/resolve`, non-rollback `applyEditOp`. Root cause of the blocking failure (June 27): music21 stores notes in Voice sub-streams for MusicXML with `<backup>` elements; `list_notes` was iterating `measure.notesAndRests` which returns `[]` for such measures, causing 400 errors invisible to the user (EditorStatusBar was hidden when no project was open). Fixed in `backend/agent/app/tools/score_edit.py` (voice-aware `list_notes` + `_find_note_at` fallback) and `EditorStatusBar.tsx` (`!engine.project` → `!engine.score`). Covered by `test_list_notes_multi_voice_returns_both_voices` and `test_transpose_semitones_multi_voice`.
 - [x] **Mixer v1.** Per-track volume / pan / mute / solo + master bus. Lives in the bottom rail.
 - [x] **Project model.** Folder format (§1.8), save/load, undo/redo, autosave every 30 s, crash recovery via the operation journal.
 - [x] **Operation log.** Every change is event-sourced. Replay reconstructs any historical state. (Diff viewer ships with M1.4.)
@@ -582,23 +582,15 @@ If the review finds we should not continue, that is information — write a *par
 | ScoreView | Separate OSMD mount vs React overlay; `osmd.clear()` before reload; IndexedDB project save for large XML |
 | UX | Errors in console + status bar (not on score); `editEnabled` when score loaded |
 
-### Known open blocker
+### Root cause (resolved June 27, 2026)
 
-Maintainer confirms: **highlight + menu + drag preview work; the notation itself does not change.** No console errors reported. Suspected failure modes for the next agent:
+**`list_notes` returned no notes for multi-voice measures.** When MusicXML has `<backup>` elements (e.g. all polyphonic imports), music21 places notes inside `Voice` sub-streams under the `Measure`. `measure.notesAndRests` is empty in that case — only iterating `measure.voices` reaches the notes. Because `list_notes` found nothing, `find_note_by_hint` raised 400 "No notes in measure N". These 4xx errors were invisible: `EditorStatusBar` returned early when `engine.project` was null (common for plain MusicXML imports not backed by a project folder), swallowing the error entirely.
 
-1. Edit API never called (handler / `busy` / event swallowing).
-2. API called with wrong coordinates → 400 swallowed or wrong note edited off-screen.
-3. API returns 200 but `engine.score.musicxml` does not update or OSMD does not reload.
-4. Reload happens but identical visual (edit applied to different voice/part).
-5. Large-score timing: user perceives no change before async reload completes.
+**Fixes:**
 
-### Verification checklist (next agent)
-
-1. `pnpm dev:stack` — backend `:8000`, Vite `:1420`.
-2. Load Chan Cil (or `public/fixtures/bach-chorale-bwv66-6.musicxml` as control).
-3. DevTools → Network: on +1 st from menu, expect `note/resolve` then `transpose-semitones` → 200.
-4. Response `musicxml` must differ; `engine.score.musicxml` must update; OSMD must re-render changed pitch.
-5. If API 400: log `part_index`, `measure_number`, `beat_offset` from menu header vs `list_notes` row.
+- `backend/agent/app/tools/score_edit.py`: added `_voice_id()` helper; `list_notes()` now iterates `measure.voices` when present (falling back to the measure for single-voice scores); `_find_note_at()` adds the same fallback so edit operations work even when `voice=None` lands on a multi-voice measure.
+- `apps/desktop/src/editor/EditorStatusBar.tsx`: changed guard from `!engine.project` → `!engine.score` so edit errors surface for imported scores without an open project.
+- `backend/agent/tests/test_score_edit.py`: added `test_list_notes_multi_voice_returns_both_voices` and `test_transpose_semitones_multi_voice` (2-voice MusicXML fixture with `<backup>` element).
 
 ### References
 

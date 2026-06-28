@@ -319,6 +319,73 @@ def test_change_pitch(client: TestClient) -> None:
     assert res.json()["pitch"] == "F4"
 
 
+TWO_VOICE_SCORE = """<?xml version='1.0' encoding='utf-8'?>
+<!DOCTYPE score-partwise PUBLIC '-//Recordare//DTD MusicXML 4.0 Partwise//EN' 'http://www.musicxml.org/dtds/partwise.dtd'>
+<score-partwise version='4.0'>
+  <part-list>
+    <score-part id='P1'><part-name>Piano</part-name></score-part>
+  </part-list>
+  <part id='P1'>
+    <measure number='1'>
+      <attributes>
+        <divisions>4</divisions>
+        <key><fifths>0</fifths></key>
+        <time><beats>4</beats><beat-type>4</beat-type></time>
+        <clef><sign>G</sign><line>2</line></clef>
+      </attributes>
+      <note>
+        <pitch><step>C</step><octave>4</octave></pitch>
+        <duration>16</duration><voice>1</voice><type>whole</type>
+      </note>
+      <backup><duration>16</duration></backup>
+      <note>
+        <pitch><step>E</step><octave>4</octave></pitch>
+        <duration>16</duration><voice>2</voice><type>whole</type>
+      </note>
+    </measure>
+  </part>
+</score-partwise>
+"""
+
+
+def test_list_notes_multi_voice_returns_both_voices(client: TestClient) -> None:
+    res = client.post("/score/edit/notes/list", json={"musicxml": TWO_VOICE_SCORE})
+    assert res.status_code == 200, res.text
+    notes = res.json()["notes"]
+    pitches = {n["pitch"] for n in notes}
+    assert "C4" in pitches, f"C4 missing from multi-voice list: {notes}"
+    assert "E4" in pitches, f"E4 missing from multi-voice list: {notes}"
+    voice_ids = {n["voice"] for n in notes}
+    assert voice_ids != {None}, "voice should not be None for all notes in a multi-voice score"
+
+
+def test_transpose_semitones_multi_voice(client: TestClient) -> None:
+    resolve = client.post(
+        "/score/edit/note/resolve",
+        json={"musicxml": TWO_VOICE_SCORE, "measure_number": 1, "pitch": "C4", "beat_hint": 0.0},
+    )
+    assert resolve.status_code == 200, resolve.text
+    r = resolve.json()
+    assert r["pitch"] == "C4"
+    assert r["voice"] is not None, "voice must be resolved for multi-voice score"
+
+    res = client.post(
+        "/score/edit/note/transpose-semitones",
+        json={
+            "musicxml": TWO_VOICE_SCORE,
+            "part_index": r["part_index"],
+            "measure_number": r["measure_number"],
+            "beat_offset": r["beat_offset"],
+            "voice": r["voice"],
+            "semitones": 1,
+        },
+    )
+    assert res.status_code == 200, res.text
+    assert res.json()["pitch"] == "C#4"
+    assert "<step>C</step>" in res.json()["musicxml"]
+    assert "<alter>1</alter>" in res.json()["musicxml"]
+
+
 def test_resolve_note_by_hint_wrong_part(client: TestClient) -> None:
     inserted = _insert_quarter(client, musicxml=BLANK_PIANO_SCORE, pitch="D4", measure=1, beat=0.0)
     res = client.post(
