@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app import __version__
 from app.config import get_settings
-from app.routes import audio, chat, export, generate, health, multi_agent, orchestration, practice, score, score_edit, style, theory, transpose
+from app.routes import audio, chat, export, generate, health, multi_agent, orchestration, practice, score, score_edit, style, tab, theory, transpose
 
 settings = get_settings()
 logging.basicConfig(level=settings.log_level.upper())
@@ -86,6 +86,7 @@ def create_app() -> FastAPI:
     #   transpose     Phase 1   real
     #   score         Phase 1   real
     #   score_edit    Phase 1   real   (M1.7 — voice-aware list_notes)
+    #   tab           Phase 4   real   (M4.0 — tab-view projection; pure, no persistence)
     #   theory        Phase 1   real
     #   chat          Phase 1   real   (Claude tool-use; tools in agent_tools.py)
     #   export        Phase 1   real, EXCEPT /export/minus-one + /export/stems = honest
@@ -103,6 +104,7 @@ def create_app() -> FastAPI:
     app.include_router(transpose.router)
     app.include_router(score.router)
     app.include_router(score_edit.router)
+    app.include_router(tab.router)
     app.include_router(theory.router)
     app.include_router(export.router)
     app.include_router(generate.router)

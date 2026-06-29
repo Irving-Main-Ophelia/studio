@@ -4,12 +4,34 @@
  * file format is documented in ADR-0009 and `docs/phases/PHASE_1.md` §1.8.
  */
 
-export const PROJECT_SCHEMA_VERSION = 1 as const;
+export const PROJECT_SCHEMA_VERSION = 3 as const;
+
+/** How a part renders (Track A, A1). */
+export type ViewMode = "staff" | "tab" | "both";
+
+/** Standard 6-string guitar tuning, string 1 (high E) first. */
+export const STANDARD_GUITAR_TUNING: string[] = ["E4", "B3", "G3", "D3", "A2", "E2"];
+
+/**
+ * Per-part guitar/fretted-instrument metadata (schema v3 — ADR-0018). Absent on
+ * non-fretted parts, which render as standard staff.
+ */
+export interface GuitarConfig {
+  /** Open-string pitch names, string 1 (highest) first. */
+  tuning: string[];
+  /** Capo fret; 0 = none. */
+  capo: number;
+  /** "nylon" | "steel" | "electric" | "bass" | "custom". */
+  profile: string;
+  view_mode: ViewMode;
+}
 
 export interface InstrumentationEntry {
   id: string;
   instrument: string;
   channel: number;
+  /** Schema v3 — present only on fretted parts (ADR-0018). */
+  guitar?: GuitarConfig | null;
 }
 
 export interface MixerTrack {

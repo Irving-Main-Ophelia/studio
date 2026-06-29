@@ -73,7 +73,7 @@ def test_invalid_musicxml_returns_400(client: TestClient) -> None:
     assert res.status_code == 400
 
 
-def test_chat_without_key_returns_503(client: TestClient) -> None:
+def test_chat_without_key_returns_503(client: TestClient, no_anthropic_key: None) -> None:
     # No ANTHROPIC_API_KEY in tests → service-unavailable.
     res = client.post(
         "/agent/chat",

@@ -55,7 +55,9 @@ def test_list_guitar_styles_returns_eight(client: TestClient) -> None:
     assert "coda_memoria" in ids
 
 
-def test_apply_no_api_key_returns_503(client: TestClient, bach_musicxml: str) -> None:
+def test_apply_no_api_key_returns_503(
+    client: TestClient, bach_musicxml: str, no_anthropic_key: None
+) -> None:
     """POST /style/apply returns 503 when ANTHROPIC_API_KEY is absent."""
     # In the test environment there is no real API key, so the endpoint returns 503.
     res = client.post(
@@ -76,7 +78,7 @@ def test_apply_unknown_composer_returns_422(client: TestClient, bach_musicxml: s
 
 
 def test_apply_guitar_style_no_api_key_returns_503(
-    client: TestClient, bach_musicxml: str
+    client: TestClient, bach_musicxml: str, no_anthropic_key: None
 ) -> None:
     """POST /style/guitar/apply returns 503 when ANTHROPIC_API_KEY is absent."""
     res = client.post(

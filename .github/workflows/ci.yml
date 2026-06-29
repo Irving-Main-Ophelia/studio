@@ -1,0 +1,63 @@
+name: CI
+
+# Runs the three test suites on every push / PR. The backend job runs the
+# edit-pipeline corpus (M3.5.3 / Workstream D): the full
+# `list → resolve → /score/edit/* → reload` path against each MusicXML fixture,
+# including the June-27 multi-voice `<backup>` regression.
+#
+# No ANTHROPIC_API_KEY is provided: the "no key → 503" tests isolate the key
+# themselves (tests/conftest.py::no_anthropic_key), and the rest of the suite is
+# music21-backed and key-free.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  backend:
+    name: Backend (pytest + edit corpus)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend/agent
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.13"
+      - name: Sync dependencies
+        run: uv sync
+      - name: Run tests
+        run: uv run pytest tests/ -q
+
+  frontend:
+    name: Frontend (typecheck + lint + vitest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.13.1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @stockhausen/desktop typecheck
+      - run: pnpm --filter @stockhausen/desktop lint
+      - run: pnpm --filter @stockhausen/desktop test
+
+  rust:
+    name: Rust core (cargo test)
+    # macOS matches the maintainer's M2 target and avoids the Linux WebKit
+    # system-dependency dance for the Tauri crate.
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: apps/desktop/src-tauri
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test --lib

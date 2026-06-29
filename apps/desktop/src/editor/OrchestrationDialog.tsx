@@ -34,7 +34,8 @@ export function OrchestrationDialog({ open, onClose }: OrchestrationDialogProps)
   useEffect(() => {
     api.listProfiles().then((ps) => {
       setProfiles(ps);
-      if (ps.length > 0 && !selected) setSelected(ps[0].name);
+      // Functional update so this effect doesn't depend on `selected`.
+      setSelected((cur) => (cur ? cur : ps.length > 0 ? ps[0].name : cur));
     }).catch(() => undefined);
   }, []);
 

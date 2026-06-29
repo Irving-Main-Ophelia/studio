@@ -60,7 +60,9 @@ import type {
   OperationRecord,
   ProjectHandle,
   RecentProject,
+  ViewMode,
 } from "../project/types";
+import { STANDARD_GUITAR_TUNING } from "../project/types";
 import {
   ApiError,
   api,
@@ -130,6 +132,9 @@ interface ScoreEngineValue {
   setSamplingMode: (mode: SamplingMode) => void;
   /** Non-null while instrument samples are loading: {done, total, label}. */
   samplerLoad: { done: number; total: number; label: string } | null;
+  /** Practice tempo: playback-speed multiplier without pitch change (1 = score tempo). */
+  practiceTempo: number;
+  setPracticeTempo: (rate: number) => void;
 
   /* --- agent diff slice (M1.4) ------------------------------------ */
   pendingDiff: ScoreDiff | null;
@@ -179,6 +184,8 @@ interface ScoreEngineValue {
   closeProject: () => Promise<void>;
   saveProject: () => Promise<void>;
   renameProject: (newTitle: string) => Promise<void>;
+  /** Persist a part's notation view (staff/tab/both) into project.json (Track A, A1). */
+  setPartViewMode: (partIndex: number, viewMode: ViewMode) => Promise<void>;
   deleteProject: (path: string) => Promise<void>;
   acceptPendingRecovery: () => Promise<void>;
   discardPendingRecovery: () => void;
@@ -278,6 +285,8 @@ export function ScoreEngineProvider({ children }: { children: React.ReactNode })
   const [samplerLoad, setSamplerLoad] = useState<{ done: number; total: number; label: string } | null>(
     null,
   );
+  // Practice tempo: playback-speed multiplier without pitch change (1 = score tempo).
+  const [practiceTempo, setPracticeTempoState] = useState(1);
 
   const playerRef = useRef<Player | null>(null);
   const opLogRef = useRef<OperationLogState>(new OperationLogState());
@@ -626,6 +635,28 @@ export function ScoreEngineProvider({ children }: { children: React.ReactNode })
     [project, refreshRecents],
   );
 
+  const setPartViewMode = useCallback(
+    async (partIndex: number, viewMode: ViewMode) => {
+      if (!project) return;
+      const instrumentation = project.meta.instrumentation.map((entry, i) => {
+        if (i !== partIndex) return entry;
+        const guitar = entry.guitar ?? {
+          tuning: STANDARD_GUITAR_TUNING,
+          capo: 0,
+          profile: "nylon",
+          view_mode: "staff" as ViewMode,
+        };
+        return { ...entry, guitar: { ...guitar, view_mode: viewMode } };
+      });
+      const next: ProjectHandle = {
+        ...project,
+        meta: { ...project.meta, instrumentation },
+      };
+      await persistProjectSave(next, score?.musicxml ?? next.score_musicxml, null);
+    },
+    [project, score, persistProjectSave],
+  );
+
   const deleteProject = useCallback(
     async (path: string) => {
       await projectPersistence.deleteProject(path);
@@ -664,9 +695,10 @@ export function ScoreEngineProvider({ children }: { children: React.ReactNode })
     player.setCountIn(countInBars);
     player.setClick(clickEnabled);
     player.setLoop(loop);
+    player.setPlaybackRate(practiceTempo);
     player.setMixerSnapshot(mixer);
     void player.play(s.extracted.notes, s.extracted.duration_sec);
-  }, [score, countInBars, clickEnabled, loop, mixer]);
+  }, [score, countInBars, clickEnabled, loop, mixer, practiceTempo]);
 
   const stop = useCallback(() => {
     playerRef.current?.stop();
@@ -676,6 +708,12 @@ export function ScoreEngineProvider({ children }: { children: React.ReactNode })
   const setSamplingMode = useCallback((mode: SamplingMode) => {
     setSamplingModeState(mode);
     playerRef.current?.setSamplingMode(mode);
+  }, []);
+
+  const setPracticeTempo = useCallback((rate: number) => {
+    const clamped = Math.min(2, Math.max(0.25, rate));
+    setPracticeTempoState(clamped);
+    playerRef.current?.setPlaybackRate(clamped);
   }, []);
 
   const renderWav = useCallback(async (): Promise<Blob> => {
@@ -699,10 +737,11 @@ export function ScoreEngineProvider({ children }: { children: React.ReactNode })
       player.setCountIn(countInBars);
       player.setClick(clickEnabled);
       player.setLoop(loop);
+      player.setPlaybackRate(practiceTempo);
       player.setMixerSnapshot(mixer);
       await player.play(s.extracted.notes, s.extracted.duration_sec, seconds);
     },
-    [score, countInBars, clickEnabled, loop, mixer],
+    [score, countInBars, clickEnabled, loop, mixer, practiceTempo],
   );
 
   const playFromCursor = useCallback(async () => {
@@ -1642,6 +1681,8 @@ export function ScoreEngineProvider({ children }: { children: React.ReactNode })
       samplingMode,
       setSamplingMode,
       samplerLoad,
+      practiceTempo,
+      setPracticeTempo,
       loadFromXml,
       loadFromUrl,
       play,
@@ -1659,6 +1700,7 @@ export function ScoreEngineProvider({ children }: { children: React.ReactNode })
       closeProject,
       saveProject,
       renameProject,
+      setPartViewMode,
       deleteProject,
       acceptPendingRecovery,
       discardPendingRecovery,
@@ -1744,6 +1786,7 @@ export function ScoreEngineProvider({ children }: { children: React.ReactNode })
       closeProject,
       saveProject,
       renameProject,
+      setPartViewMode,
       deleteProject,
       acceptPendingRecovery,
       discardPendingRecovery,
@@ -1766,6 +1809,8 @@ export function ScoreEngineProvider({ children }: { children: React.ReactNode })
       samplingMode,
       setSamplingMode,
       samplerLoad,
+      practiceTempo,
+      setPracticeTempo,
       setTrackGain,
       setTrackPan,
       setTrackMute,

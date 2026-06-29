@@ -61,6 +61,7 @@ export class Player {
   private countInBars = 0;
   private tempoBpm = 90;
   private beatsPerBar = 4;
+  private playbackRate = 1;
   private scheduledClicks: AudioBufferSourceNode[] = [];
   private cachedNotes: NoteEvent[] = [];
 
@@ -152,6 +153,23 @@ export class Player {
     if (beatsPerBar > 0) this.beatsPerBar = beatsPerBar;
   }
 
+  /**
+   * Practice tempo — playback speed **without pitch change** (PHASE_3_5.md §3.5.4 B).
+   *
+   * With a sampler bank, tempo-without-pitch is exact and free: every voice plays
+   * its sample at the natural pitch, so a slower tempo is just the note schedule
+   * spread further apart in time. `rate` < 1 = slower, > 1 = faster (clamped to
+   * [0.25, 2]). Time-domain stretching of *recorded audio* (Rubber Band / SoundTouch)
+   * is a separate, Phase-5 concern; the `rubberband_stretch` Tauri scaffold stays for it.
+   */
+  setPlaybackRate(rate: number): void {
+    this.playbackRate = rate > 0 ? Math.min(2, Math.max(0.25, rate)) : 1;
+  }
+
+  getPlaybackRate(): number {
+    return this.playbackRate;
+  }
+
   async play(notes: NoteEvent[], totalDurationSec: number, fromSec = 0): Promise<void> {
     await this.preload();
     if (!this.engine || !this.context) return;
@@ -163,8 +181,10 @@ export class Player {
     this.offsetSec = Math.max(0, fromSec);
 
     const now = this.context.currentTime;
+    const rate = this.playbackRate;
+    // beatSec is in *score* seconds; wall-clock spacing is beatSec / rate.
     const beatSec = 60 / this.tempoBpm;
-    const countInSec = this.countInBars * this.beatsPerBar * beatSec;
+    const countInSec = (this.countInBars * this.beatsPerBar * beatSec) / rate;
     const leadIn = 0.05;
     this.playStart = now + leadIn + countInSec;
 
@@ -172,7 +192,7 @@ export class Player {
       this.scheduleClickRegion(now + leadIn, countInSec, /*include downbeat */ true);
     }
     if (this.clickEnabled) {
-      this.scheduleClickRegion(this.playStart, totalDurationSec - this.offsetSec, false);
+      this.scheduleClickRegion(this.playStart, (totalDurationSec - this.offsetSec) / rate, false);
     }
 
     this.scheduleNotes(notes, this.playStart, this.offsetSec, this.loopRegion);
@@ -192,6 +212,8 @@ export class Player {
     loop: LoopRegion | null,
   ): void {
     if (!this.engine) return;
+    // Score-seconds → wall-clock: divide every offset/duration by the playback rate.
+    const rate = this.playbackRate;
     if (loop) {
       const loopLen = loop.end_sec - loop.start_sec;
       const repetitions = Math.max(1, Math.ceil(8 / Math.max(loopLen, 0.001)));
@@ -201,11 +223,11 @@ export class Player {
           (n) => n.start_sec >= loop.start_sec && n.start_sec < loop.end_sec,
         );
         for (const evt of inLoop) {
-          const t = startTime + (evt.start_sec - loop.start_sec) + cycleOffset;
+          const t = startTime + ((evt.start_sec - loop.start_sec) + cycleOffset) / rate;
           this.engine.startNote(evt.part_index, {
             note: evt.midi,
             time: t,
-            duration: Math.max(0.01, evt.duration_sec),
+            duration: Math.max(0.01, evt.duration_sec) / rate,
             velocity: evt.velocity,
           });
         }
@@ -218,8 +240,8 @@ export class Player {
       if (evt.start_sec + evt.duration_sec < offsetSec) continue;
       this.engine.startNote(evt.part_index, {
         note: evt.midi,
-        time: startTime + Math.max(0, evt.start_sec - offsetSec),
-        duration: Math.max(0.01, evt.duration_sec),
+        time: startTime + Math.max(0, evt.start_sec - offsetSec) / rate,
+        duration: Math.max(0.01, evt.duration_sec) / rate,
         velocity: evt.velocity,
       });
     }
@@ -235,7 +257,8 @@ export class Player {
     accentDownbeat: boolean,
   ): void {
     if (!this.context) return;
-    const beatSec = 60 / this.tempoBpm;
+    // Wall-clock beat spacing — the click follows the practice tempo too.
+    const beatSec = 60 / this.tempoBpm / this.playbackRate;
     let t = startTime;
     let beatIndex = 0;
     while (t < startTime + lengthSec - 1e-3) {
@@ -266,7 +289,9 @@ export class Player {
 
   private tick = () => {
     if (!this.context || this.status !== "playing") return;
-    const pos = this.context.currentTime - this.playStart + this.offsetSec;
+    // Report position in *score* seconds: wall-clock elapsed × rate (so the
+    // playhead and time label track the score, not the slowed-down wall clock).
+    const pos = this.offsetSec + (this.context.currentTime - this.playStart) * this.playbackRate;
     if (pos >= this.playDuration) {
       this.setStatus("ready");
       this.listener.onProgress?.(this.playDuration);

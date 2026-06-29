@@ -12,6 +12,14 @@ import { api, type ListedNoteRow } from "../lib/api";
 
 interface ScoreViewProps {
   musicxml: string | null;
+  /**
+   * Optional view-projected MusicXML to render in OSMD instead of `musicxml`
+   * (e.g. a tablature view, Track A / A1). When set, it drives the rendered
+   * staves and the note index; `musicxml` stays the canonical source of truth
+   * for editing, so the edit overlay is expected to be disabled while a
+   * projection is active.
+   */
+  renderMusicxml?: string | null;
   timeSignature?: string;
   positionSec?: number;
   durationSec?: number;
@@ -44,6 +52,7 @@ interface ScoreViewProps {
  */
 export function ScoreView({
   musicxml,
+  renderMusicxml = null,
   timeSignature = "4/4",
   positionSec = 0,
   durationSec = 0,
@@ -87,13 +96,19 @@ export function ScoreView({
     };
   }, [theme]);
 
+  // After mount the scroll + OSMD mount refs are attached; flip the overlay on once.
   useEffect(() => {
     setOverlayReady(!!scrollRef.current && !!osmdMountRef.current);
-  });
+  }, []);
+
+  // What OSMD actually renders: the projected view if one is active, else the
+  // canonical score. Keeping the note index/annotations on the *same* XML avoids
+  // an overlay/layout mismatch when a tab projection is shown.
+  const displayXml = renderMusicxml ?? musicxml;
 
   useEffect(() => {
     const osmd = osmdRef.current;
-    if (!osmd || !musicxml) return;
+    if (!osmd || !displayXml) return;
 
     const isFirstLoad = prevMusicxmlRef.current === null;
     if (isFirstLoad) setLoading(true);
@@ -104,7 +119,7 @@ export function ScoreView({
     void (async () => {
       try {
         osmd.clear();
-        await osmd.load(musicxml);
+        await osmd.load(displayXml);
         if (cancelled) return;
         await new Promise<void>((resolve) => {
           requestAnimationFrame(() => resolve());
@@ -114,10 +129,10 @@ export function ScoreView({
         setLoading(false);
         setUpdating(false);
         if (!osmdMountRef.current) return;
-        const res = await api.listScoreNotes(musicxml);
+        const res = await api.listScoreNotes(displayXml);
         if (cancelled || !osmdMountRef.current) return;
         setNoteIndex(res.notes);
-        const ts = timeSignatureFromMusicXml(musicxml);
+        const ts = timeSignatureFromMusicXml(displayXml);
         annotateScoreNotes(osmd, osmdMountRef.current, res.notes, ts || timeSignature);
       } catch (err: unknown) {
         if (cancelled) return;
@@ -128,11 +143,11 @@ export function ScoreView({
       }
     })();
 
-    prevMusicxmlRef.current = musicxml;
+    prevMusicxmlRef.current = displayXml;
     return () => {
       cancelled = true;
     };
-  }, [musicxml, timeSignature]);
+  }, [displayXml, timeSignature]);
 
   const isParchment = theme === "parchment";
 

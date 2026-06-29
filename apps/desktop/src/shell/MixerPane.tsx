@@ -23,6 +23,9 @@ export function MixerPane() {
   const countIn = engine.countInBars;
   const pianoOnly = engine.samplingMode === "piano-only";
   const load = engine.samplerLoad;
+  const practice = engine.practiceTempo;
+  // Cycle 100% → 75% → 50% → 100% … for a quick practice-tempo slow-down.
+  const nextPractice = practice >= 1 ? 0.75 : practice >= 0.75 ? 0.5 : 1;
 
   return (
     <section className="flex h-full flex-col rounded-md border border-obsidian-700/60 bg-obsidian-900/40 px-3 py-2">
@@ -34,6 +37,17 @@ export function MixerPane() {
               loading {load.label} {load.done}/{load.total}
             </span>
           )}
+          <button
+            onClick={() => engine.setPracticeTempo(nextPractice)}
+            title="Practice tempo — playback speed without pitch change. Click to cycle 100/75/50%."
+            className={`num rounded px-1.5 py-0.5 transition-colors ${
+              practice < 1
+                ? "bg-neon-cyan/15 text-neon-cyan"
+                : "text-zinc-500 hover:bg-obsidian-700"
+            }`}
+          >
+            tempo {Math.round(practice * 100)}%
+          </button>
           <button
             onClick={() => engine.setSamplingMode(pianoOnly ? "multi" : "piano-only")}
             title="Use a single piano for every part (low RAM). Off = a distinct instrument per part."

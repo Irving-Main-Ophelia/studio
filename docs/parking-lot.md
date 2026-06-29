@@ -46,8 +46,12 @@ parking lot tells the truth.
   **sfizz.wasm + VSCO 2 CE** path (highest fidelity) remains deferred: it needs an external
   Emscripten build of sfizz + a 3–4 GB local sample download. It is scaffolded as `SfizzSampler` and
   drops in behind the same interface. See `docs/phases/PHASE_3_5.md` §3.5.4 B.
-- **Rubber Band GPL FFI implementation (M1.2, deferred).** Scaffold + Tauri
-  command shipped. Real C++ link drops in behind the same surface.
+- **Rubber Band GPL FFI implementation (M1.2, deferred — narrowed in M3.5.1).**
+  Tempo-without-pitch for *playback* shipped as a practice-tempo control
+  (`Player.setPlaybackRate`): with a sampler bank, slowing down is just rescaling
+  the note schedule, no time-stretching needed. Rubber Band's real C++ link is now
+  only for stretching *recorded audio* (Phase 5 takes); the `rubberband_stretch`
+  Tauri scaffold stays for it and drops in behind the same surface.
 - **Per-track output meters in the mixer (M1.2, deferred).** Need AnalyserNodes
   per channel; slipping to M1.5 polish.
 - **Stale-diff UI prompt (M1.4, partial).** The diff already carries

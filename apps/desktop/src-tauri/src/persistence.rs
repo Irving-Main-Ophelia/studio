@@ -33,8 +33,35 @@ use tauri::AppHandle;
 use tracing::{info, warn};
 use uuid::Uuid;
 
-/// `project.json` schema version. Bumping this requires writing a migrator.
-pub const SCHEMA_VERSION: u32 = 1;
+/// `project.json` schema version. Bumping this requires writing a migrator
+/// (see [`migrate_meta`]).
+///
+/// - v1: Phase-1 format (mixer = gain/pan/mute/solo + master).
+/// - v2: Phase-3.5 (M3.5.2) — reserves the DAW shapes the Phase 4–8 tracks need
+///   (per-track sends/inserts/group, mixer buses, master inserts, automation,
+///   audio_clips, markers). All empty/defaulted until their owning phase ships;
+///   reserving them now avoids a migration tax later. See ADR-0016.
+/// - v3: Phase-4 (M4.0/M4.2) — adds an optional per-part `guitar` block
+///   (tuning / capo / profile / view_mode) for tablature. Absent ⇒ non-fretted
+///   part, standard staff (today's behaviour). See ADR-0018.
+pub const SCHEMA_VERSION: u32 = 3;
+
+/// Per-part guitar/fretted-instrument metadata. Reserved (schema v3) for Phase 4
+/// (Track A). `None` on an [`InstrumentationEntry`] means a non-fretted part that
+/// renders as standard staff. See ADR-0018.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GuitarConfig {
+    /// Open-string pitches, string 1 (highest/thinnest) first — matches MusicXML
+    /// `<string>` numbering. An array so N-string instruments are data, not code.
+    pub tuning: Vec<String>,
+    /// Capo fret; `0` = none. Tab fret numbers are read relative to it.
+    #[serde(default)]
+    pub capo: u8,
+    /// `nylon` | `steel` | `electric` | `bass` | `custom`.
+    pub profile: String,
+    /// `staff` | `tab` | `both` — how this part renders (Track A, A1).
+    pub view_mode: String,
+}
 
 /// Mirrors `project.json#instrumentation[*]`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -43,6 +70,10 @@ pub struct InstrumentationEntry {
     pub instrument: String,
     #[serde(default)]
     pub channel: u8,
+    /// Reserved (schema v3) for Phase 4 — per-part guitar metadata. Absent on
+    /// non-fretted parts (kept off-disk so they stay byte-stable). See ADR-0018.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub guitar: Option<GuitarConfig>,
 }
 
 /// Mirrors `project.json#mixer.tracks[*]`.
@@ -57,12 +88,24 @@ pub struct MixerTrack {
     pub mute: bool,
     #[serde(default)]
     pub solo: bool,
+    /// Reserved (schema v2) for Track C / Phase 6 — send levels to aux/submix buses. Empty until then.
+    #[serde(default)]
+    pub sends: Vec<JsonValue>,
+    /// Reserved (schema v2) for Track C — per-track insert effect chain. Empty until then.
+    #[serde(default)]
+    pub inserts: Vec<JsonValue>,
+    /// Reserved (schema v2) for Track C — group/VCA membership. `null` until then.
+    #[serde(default)]
+    pub group: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct MixerMaster {
     #[serde(default)]
     pub gain_db: f32,
+    /// Reserved (schema v2) for Track C — master insert chain. Empty until then.
+    #[serde(default)]
+    pub inserts: Vec<JsonValue>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -71,6 +114,9 @@ pub struct MixerState {
     pub tracks: Vec<MixerTrack>,
     #[serde(default)]
     pub master: MixerMaster,
+    /// Reserved (schema v2) for Track C — aux/submix bus definitions. Empty until then.
+    #[serde(default)]
+    pub buses: Vec<JsonValue>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -81,7 +127,7 @@ pub struct AgentState {
     pub pinned_explanations: Vec<String>,
 }
 
-/// Mirrors the on-disk `project.json` (schema v1).
+/// Mirrors the on-disk `project.json` (schema v3 — see [`SCHEMA_VERSION`]).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectMeta {
     #[serde(default = "default_schema_version")]
@@ -103,6 +149,15 @@ pub struct ProjectMeta {
     pub agent_state: AgentState,
     #[serde(default)]
     pub composition_brief: Option<String>,
+    /// Reserved (schema v2) for Track C — per-track/param automation breakpoint lanes. Empty until Phase 6.
+    #[serde(default)]
+    pub automation: Vec<JsonValue>,
+    /// Reserved (schema v2) for Track B — references into `takes/` with offsets + clip gain. Empty until Phase 5.
+    #[serde(default)]
+    pub audio_clips: Vec<JsonValue>,
+    /// Reserved (schema v2) for Track B — named song-position markers (tie to analyze_form). Empty until Phase 5.
+    #[serde(default)]
+    pub markers: Vec<JsonValue>,
     /// Index of the last operation that has been folded into `score.musicxml`.
     /// `-1` means the project is brand-new and has never had an operation.
     #[serde(default = "default_last_op_index")]
@@ -115,6 +170,32 @@ fn default_schema_version() -> u32 {
 
 fn default_last_op_index() -> i64 {
     -1
+}
+
+/// Upgrade `meta` in place to the current [`SCHEMA_VERSION`]. Returns `true` when it
+/// changed (so the caller rewrites `project.json`), `false` when already current.
+/// Errors only on a *newer*-than-supported schema.
+///
+/// Both migrations so far are purely additive, so neither needs field transforms:
+/// - v1 → v2: reserves the DAW shapes (per-track sends/inserts/group, mixer buses,
+///   master inserts, automation, audio_clips, markers).
+/// - v2 → v3: adds the optional per-part `guitar` block (ADR-0018).
+/// New fields deserialise to empty/`None` via `#[serde(default)]`, so the in-memory
+/// struct is already correct after parsing — migration just stamps the new version
+/// (a v1 project jumps straight to v3 in one stamp). Future migrations that *do*
+/// need transforms should chain stepwise here.
+fn migrate_meta(meta: &mut ProjectMeta) -> Result<bool, String> {
+    if meta.schema_version > SCHEMA_VERSION {
+        return Err(format!(
+            "Unsupported project schema_version {} (this build expects {SCHEMA_VERSION}). Update Stockhausen.",
+            meta.schema_version
+        ));
+    }
+    if meta.schema_version == SCHEMA_VERSION {
+        return Ok(false);
+    }
+    meta.schema_version = SCHEMA_VERSION;
+    Ok(true)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -381,6 +462,9 @@ pub fn project_new(spec: NewProjectSpec) -> Result<ProjectHandle, String> {
             pan: 0.0,
             mute: false,
             solo: false,
+            sends: Vec::new(),
+            inserts: Vec::new(),
+            group: None,
         })
         .collect();
     let meta = ProjectMeta {
@@ -396,10 +480,17 @@ pub fn project_new(spec: NewProjectSpec) -> Result<ProjectHandle, String> {
         instrumentation: spec.instrumentation.clone(),
         mixer: MixerState {
             tracks: mixer_tracks,
-            master: MixerMaster { gain_db: 0.0 },
+            master: MixerMaster {
+                gain_db: 0.0,
+                inserts: Vec::new(),
+            },
+            buses: Vec::new(),
         },
         agent_state: AgentState::default(),
         composition_brief: None,
+        automation: Vec::new(),
+        audio_clips: Vec::new(),
+        markers: Vec::new(),
         last_op_index: spec.initial_operation.index,
     };
 
@@ -431,14 +522,22 @@ pub fn project_open(path: PathBuf) -> Result<ProjectHandle, String> {
 
     let meta_bytes =
         fs::read(&meta_path).map_err(|e| format!("read {}: {e}", meta_path.display()))?;
-    let meta: ProjectMeta =
+    let mut meta: ProjectMeta =
         serde_json::from_slice(&meta_bytes).map_err(|e| format!("parse project.json: {e}"))?;
 
-    if meta.schema_version != SCHEMA_VERSION {
-        return Err(format!(
-            "Unsupported project schema_version {} (this build expects {SCHEMA_VERSION}). A migration is not yet available.",
-            meta.schema_version
-        ));
+    // On-load migration (ADR-0016). A v1 project upgrades to v2 in place; the new
+    // DAW fields default to empty via `#[serde(default)]`, so the upgrade is lossless.
+    let from_version = meta.schema_version;
+    if migrate_meta(&mut meta)? {
+        let bytes = serde_json::to_vec_pretty(&meta)
+            .map_err(|e| format!("serialise migrated project.json: {e}"))?;
+        atomic_write(&meta_path, &bytes)?;
+        info!(
+            "migrated project {} from schema v{} to v{}",
+            path.display(),
+            from_version,
+            SCHEMA_VERSION
+        );
     }
 
     let score_musicxml = fs::read_to_string(&score_path)
@@ -572,6 +671,7 @@ mod tests {
                 id: "piano".into(),
                 instrument: "piano".into(),
                 channel: 0,
+                guitar: None,
             }],
             initial_musicxml: "<score-partwise/>".to_string(),
             initial_operation: fake_op(0),
@@ -698,6 +798,151 @@ mod tests {
             .map(|o| o.index)
             .collect();
         assert_eq!(pending_indices, vec![6, 7, 8, 9, 10]);
+    }
+
+    #[test]
+    fn migrates_v1_project_to_current_losslessly_and_byte_stable() {
+        let tmp = tempdir().unwrap();
+        let dir = tmp.path().join("legacy");
+        fs::create_dir_all(&dir).unwrap();
+
+        // A minimal schema-v1 project.json — none of the v2 DAW fields present.
+        let v1 = json!({
+            "schema_version": 1,
+            "id": "legacy-id",
+            "title": "Legacy Piece",
+            "composer": "Old Hand",
+            "created_at": "2026-01-01T00:00:00Z",
+            "updated_at": "2026-01-01T00:00:00Z",
+            "tempo_bpm": 100.0,
+            "time_signature": "3/4",
+            "key_signature": "G major",
+            "instrumentation": [{ "id": "piano", "instrument": "piano", "channel": 0 }],
+            "mixer": {
+                "tracks": [{ "id": "piano", "gain_db": -3.0, "pan": 0.2, "mute": false, "solo": false }],
+                "master": { "gain_db": 0.0 }
+            },
+            "agent_state": { "last_seen_message_count": 0, "pinned_explanations": [] },
+            "composition_brief": null,
+            "last_op_index": 0
+        });
+        atomic_write(
+            &dir.join("project.json"),
+            &serde_json::to_vec_pretty(&v1).unwrap(),
+        )
+        .unwrap();
+        atomic_write(&dir.join("score.musicxml"), b"<score-partwise/>").unwrap();
+        append_journal(&dir.join("operations.log"), &fake_op(0)).unwrap();
+
+        // Open → migrates v1 → current (v3) in one stamp and rewrites project.json.
+        let handle = project_open(dir.clone()).expect("open + migrate v1");
+        assert_eq!(handle.meta.schema_version, SCHEMA_VERSION);
+
+        // Reserved DAW shapes exist and are empty/defaulted.
+        assert!(handle.meta.automation.is_empty());
+        assert!(handle.meta.audio_clips.is_empty());
+        assert!(handle.meta.markers.is_empty());
+        assert!(handle.meta.mixer.buses.is_empty());
+        assert!(handle.meta.mixer.master.inserts.is_empty());
+        let track = &handle.meta.mixer.tracks[0];
+        assert!(track.sends.is_empty());
+        assert!(track.inserts.is_empty());
+        assert_eq!(track.group, None);
+
+        // Unchanged v1 data is preserved exactly.
+        assert_eq!(track.gain_db, -3.0);
+        assert_eq!(track.pan, 0.2);
+        assert_eq!(handle.meta.title, "Legacy Piece");
+        assert_eq!(handle.meta.last_op_index, 0);
+        assert_eq!(handle.score_musicxml, "<score-partwise/>");
+
+        // A migrated non-guitar part stays guitar-less (off-disk), so it is byte-stable:
+        // a second open does not re-migrate or rewrite project.json.
+        assert!(handle.meta.instrumentation[0].guitar.is_none());
+        let after_first = fs::read(dir.join("project.json")).unwrap();
+        let handle2 = project_open(dir.clone()).expect("reopen migrated project");
+        assert_eq!(handle2.meta.schema_version, SCHEMA_VERSION);
+        let after_second = fs::read(dir.join("project.json")).unwrap();
+        assert_eq!(
+            after_first, after_second,
+            "second open must not rewrite an already-current project"
+        );
+    }
+
+    #[test]
+    fn migrates_v2_project_to_v3_and_round_trips_guitar_config() {
+        let tmp = tempdir().unwrap();
+        let dir = tmp.path().join("guitar");
+        fs::create_dir_all(&dir).unwrap();
+
+        // A schema-v2 project with a part that already carries a guitar block
+        // (e.g. written by a build mid-Phase-4). v2→v3 is additive, so the block
+        // must survive open → migrate → save → reopen unchanged.
+        let v2 = json!({
+            "schema_version": 2,
+            "id": "gtr-id",
+            "title": "Variación",
+            "composer": "Irving",
+            "created_at": "2026-01-01T00:00:00Z",
+            "updated_at": "2026-01-01T00:00:00Z",
+            "tempo_bpm": 96.0,
+            "time_signature": "3/4",
+            "key_signature": "A minor",
+            "instrumentation": [{
+                "id": "guitar", "instrument": "guitar", "channel": 0,
+                "guitar": {
+                    "tuning": ["E4","B3","G3","D3","A2","E2"],
+                    "capo": 2,
+                    "profile": "nylon",
+                    "view_mode": "both"
+                }
+            }],
+            "mixer": {
+                "tracks": [{ "id": "guitar", "gain_db": 0.0, "pan": 0.0, "mute": false, "solo": false }],
+                "master": { "gain_db": 0.0 }
+            },
+            "agent_state": { "last_seen_message_count": 0, "pinned_explanations": [] },
+            "last_op_index": 0
+        });
+        atomic_write(
+            &dir.join("project.json"),
+            &serde_json::to_vec_pretty(&v2).unwrap(),
+        )
+        .unwrap();
+        atomic_write(&dir.join("score.musicxml"), b"<score-partwise/>").unwrap();
+        append_journal(&dir.join("operations.log"), &fake_op(0)).unwrap();
+
+        let handle = project_open(dir.clone()).expect("open + migrate v2");
+        assert_eq!(handle.meta.schema_version, SCHEMA_VERSION);
+
+        let gtr = handle.meta.instrumentation[0]
+            .guitar
+            .as_ref()
+            .expect("guitar block preserved through v2→v3 migration");
+        assert_eq!(
+            gtr.tuning,
+            vec!["E4", "B3", "G3", "D3", "A2", "E2"]
+        );
+        assert_eq!(gtr.capo, 2);
+        assert_eq!(gtr.profile, "nylon");
+        assert_eq!(gtr.view_mode, "both");
+
+        // Re-open after the migration rewrite is byte-stable (already current).
+        let after_first = fs::read(dir.join("project.json")).unwrap();
+        let _ = project_open(dir.clone()).expect("reopen migrated v3");
+        let after_second = fs::read(dir.join("project.json")).unwrap();
+        assert_eq!(after_first, after_second);
+    }
+
+    #[test]
+    fn rejects_newer_than_supported_schema() {
+        // A project written by a future build (schema ahead of us) must be refused,
+        // not silently mangled.
+        let tmp = tempdir().unwrap();
+        let handle = project_new(build_spec("Future", tmp.path())).unwrap();
+        let mut m = handle.meta.clone();
+        m.schema_version = SCHEMA_VERSION + 1;
+        assert!(migrate_meta(&mut m).is_err());
     }
 
     #[test]

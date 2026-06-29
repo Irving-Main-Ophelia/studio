@@ -17,6 +17,7 @@ import type {
   VoiceLeadingValidation,
   VoicingValidation,
 } from "@stockhausen/theory-types";
+import type { ViewMode } from "../project/types";
 
 export const BACKEND_URL = "http://127.0.0.1:8000";
 
@@ -257,6 +258,20 @@ export const api = {
 
   listScoreNotes: (musicxml: string) =>
     post<{ notes: ListedNoteRow[] }>("/score/edit/notes/list", { musicxml }),
+
+  /**
+   * Project the canonical score into per-part tablature views for OSMD (Track A, A1).
+   * Display-only: the canonical MusicXML stays the source of truth (ADR-0015).
+   */
+  projectTabView: (req: {
+    musicxml: string;
+    parts: {
+      part_index: number;
+      view_mode: ViewMode;
+      tuning?: string[] | null;
+      capo?: number;
+    }[];
+  }) => post<{ musicxml: string }>("/score/tab/project", req),
 
   resolveScoreNote: (req: {
     musicxml: string;

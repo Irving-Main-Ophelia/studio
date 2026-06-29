@@ -11,6 +11,7 @@ import { TransposeDialog } from "../editor/TransposeDialog";
 import { useScoreEngine } from "../lib/ScoreEngine";
 import { isTauri } from "../lib/tauri";
 import { useKeyboardShortcuts } from "../lib/useKeyboardShortcuts";
+import { importGuitarProBytes, isGuitarProFile } from "../notation/guitarpro/importGuitarPro";
 import { NewProjectDialog } from "../project/NewProjectDialog";
 import { RecoveryBanner } from "../project/RecoveryBanner";
 import { BottomRail } from "./BottomRail";
@@ -57,6 +58,16 @@ export function Shell({ info }: { info: AppInfo }) {
     const file = e.target.files?.[0];
     if (!file) return;
     e.target.value = "";
+    if (isGuitarProFile(file.name)) {
+      // alphaTab parses the binary GP model; we convert to MusicXML (ADR-0019).
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const { musicxml, warnings } = await importGuitarProBytes(bytes);
+      if (warnings.length) {
+        console.warn(`Guitar Pro import: ${warnings.length} effect(s) not converted —`, warnings);
+      }
+      await engine.loadFromXml(file.name, musicxml);
+      return;
+    }
     const text = await file.text();
     await engine.loadFromXml(file.name, text);
   };
@@ -111,7 +122,7 @@ export function Shell({ info }: { info: AppInfo }) {
       <input
         ref={xmlInputRef}
         type="file"
-        accept=".xml,.musicxml"
+        accept=".xml,.musicxml,.gp,.gpx,.gp3,.gp4,.gp5"
         className="sr-only"
         onChange={(e) => void handleXmlFile(e)}
       />

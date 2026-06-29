@@ -120,6 +120,7 @@ export function TopBar({ info, onNewProject, onImportAudio, onOpenMusicXml, onEx
             <FileMenuItem icon={<Music2 size={12} />} label="Import Audio" sub="FLAC · MP3 · WAV" onClick={() => { setShowFileMenu(false); onImportAudio(); }} />
             <FileMenuItem icon={<FileMusic size={12} />} label="Import MIDI" sub=".mid · .midi" onClick={() => { setShowFileMenu(false); onImportAudio(); }} />
             <FileMenuItem icon={<FolderOpen size={12} />} label="Open MusicXML" sub=".xml · .musicxml" onClick={() => { setShowFileMenu(false); onOpenMusicXml(); }} />
+            <FileMenuItem icon={<FileMusic size={12} />} label="Import Guitar Pro" sub=".gp · .gpx · .gp5" onClick={() => { setShowFileMenu(false); onOpenMusicXml(); }} />
             <div className="mx-3 my-1.5 border-t border-white/8" />
             <FileMenuItem icon={<Upload size={12} />} label="Export" shortcut="E" onClick={() => { setShowFileMenu(false); onExport(); }} />
           </div>

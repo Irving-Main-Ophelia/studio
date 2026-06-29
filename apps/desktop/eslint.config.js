@@ -14,6 +14,7 @@ export default tseslint.config(
       "src-tauri/target/**",
       "node_modules/**",
       "coverage/**",
+      "**/__fixtures__/**", // test fixtures + Node generator scripts, not app code
       "**/*.d.ts",
       "eslint.config.js",
       "vitest.config.ts",
