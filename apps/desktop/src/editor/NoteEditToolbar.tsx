@@ -132,6 +132,10 @@ export function NoteEditToolbar() {
           onDuration={(q) => void engine.editNoteDuration(menu.note, q)}
           onArticulation={(a: Articulation) => void engine.editNoteArticulation(menu.note, a)}
           onDynamic={(d: Dynamic) => void engine.editNoteDynamic(menu.note, d)}
+          onBend={(alter) => void engine.editNoteBend(menu.note, alter)}
+          onConnective={(technique) => void engine.editNoteConnective(menu.note, technique)}
+          onMarker={(marker) => void engine.editNoteMarker(menu.note, marker)}
+          onSpan={(technique) => void engine.editNoteSpan(menu.note, technique)}
           onRespell={() => void engine.editNoteRespell(menu.note)}
           onPitch={(p) => void engine.editNotePitch(menu.note, p)}
           onTranspose={(st) => void engine.transposeNote(menu.note, st)}

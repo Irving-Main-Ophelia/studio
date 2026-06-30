@@ -25,10 +25,11 @@ from __future__ import annotations
 
 from typing import Any, Literal, cast
 
-from music21 import articulations, dynamics, expressions, key, stream
+from music21 import articulations, dynamics, expressions, key, spanner, stream
 from music21 import base as m21base
 from music21 import chord as m21chord
 from music21 import duration as m21duration
+from music21 import interval as m21interval
 from music21 import note as m21note
 from music21 import pitch as m21pitch
 from music21 import tie as m21tie
@@ -36,6 +37,36 @@ from music21 import tie as m21tie
 from .theory import _parse as _parse_raw
 
 TieType = Literal["start", "stop", "continue", "none"]
+
+# Connective guitar techniques: a spanner is drawn from the addressed note to
+# the immediately following note (ADR-0020). The authoring gesture is a single
+# cursor; the two-note span is an implementation detail.
+ALLOWED_CONNECTIVE_TECHNIQUES: dict[str, type[spanner.Spanner]] = {
+    "hammer_on": articulations.HammerOn,
+    "pull_off": articulations.PullOff,
+    "slide": spanner.Glissando,
+}
+
+# Point technical markers attached to one note (ADR-0020). Each toggles on/off;
+# the handler in ``toggle_technical_marker`` knows whether it lives on the note's
+# articulations, expressions, notehead, or as a single-note spanner.
+ALLOWED_TECHNICAL_MARKERS: tuple[str, ...] = (
+    "natural_harmonic",
+    "artificial_harmonic",
+    "vibrato",
+    "dead_note",
+    "ghost_note",
+    "strum_up",
+    "strum_down",
+)
+
+# Bracketed spans drawn across a range as a dashed/solid bracket (ADR-0020).
+# music21 has no semantic palm-mute/let-ring element, so the line style carries
+# the distinction (dashed = palm mute, solid = let ring) — a documented caveat.
+ALLOWED_BRACKET_SPANS: dict[str, str] = {
+    "palm_mute": "dashed",
+    "let_ring": "solid",
+}
 
 # Quarter-note tolerance for "this offset matches that note". 1/250 of a beat
 # is well below 1 ms at any practical tempo and survives music21's float
@@ -369,6 +400,327 @@ def set_tie(
     else:
         existing.tie = m21tie.Tie(tie_type)  # type: ignore[no-untyped-call]
     return {"musicxml": _serialise(score)}
+
+
+def set_bend(
+    musicxml: str,
+    *,
+    part_index: int,
+    measure_number: int,
+    beat_offset: float,
+    bend_alter: int,
+    pre_bend: bool = False,
+    release: float | None = None,
+    voice: int | None = None,
+) -> dict[str, Any]:
+    """Add, change, or remove a string bend on the note at the position.
+
+    ``bend_alter`` is the bend target in semitones (positive = bend up,
+    negative = bend down); ``0`` removes any existing bend. ``pre_bend`` marks
+    the string as already bent at the note's onset; ``release`` is the
+    quarter-length offset at which the bend is released, if any.
+
+    Maps to music21 ``articulations.FretBend`` → MusicXML ``<bend>`` (ADR-0020).
+    """
+    score = _parse(musicxml)
+    part = _get_part(score, part_index)
+    measure = _get_measure(part, measure_number)
+    container = _find_voice_or_measure(measure, voice)
+    existing = _find_note_at(container, beat_offset)
+    if existing is None or not isinstance(existing, m21note.Note):
+        raise ValueError(
+            f"No note found at part={part_index} measure={measure_number} beat={beat_offset}"
+        )
+
+    had_bend = any(isinstance(a, articulations.FretBend) for a in existing.articulations)
+    existing.articulations = [
+        a for a in existing.articulations if not isinstance(a, articulations.FretBend)
+    ]
+
+    if bend_alter == 0:
+        action = "removed" if had_bend else "unchanged"
+    else:
+        existing.articulations.append(
+            articulations.FretBend(
+                bendAlter=m21interval.ChromaticInterval(bend_alter),
+                preBend=pre_bend,
+                release=release,
+            )
+        )
+        action = "changed" if had_bend else "added"
+
+    return {"musicxml": _serialise(score), "action": action}
+
+
+def _notrests_in(container: stream.Stream[Any]) -> list[m21note.NotRest]:
+    """Pitched notes/chords in a container, descending into voices when needed."""
+    items: list[m21base.Music21Object] = list(container.notesAndRests)
+    if not items and isinstance(container, stream.Measure):
+        for v in container.voices:
+            items.extend(list(v.notesAndRests))
+    return [el for el in items if isinstance(el, m21note.NotRest)]
+
+
+def _next_notrest_after(
+    part: stream.Part,
+    container: stream.Stream[Any],
+    note: m21note.NotRest,
+) -> m21note.NotRest | None:
+    """Return the next pitched note after ``note`` in performance order.
+
+    Searches the same container first; if ``note`` is the last pitched element
+    there, spills into the first pitched element of a following measure.
+    """
+    start_off = float(note.offset)
+    later = sorted(
+        (el for el in _notrests_in(container) if float(el.offset) > start_off),
+        key=lambda el: float(el.offset),
+    )
+    if later:
+        return later[0]
+
+    current_measure = note.getContextByClass(stream.Measure)
+    if current_measure is None:
+        return None
+    measures = list(part.getElementsByClass(stream.Measure))
+    try:
+        idx = measures.index(current_measure)
+    except ValueError:
+        return None
+    for following in measures[idx + 1 :]:
+        nxt = sorted(_notrests_in(following), key=lambda el: float(el.offset))
+        if nxt:
+            return nxt[0]
+    return None
+
+
+def set_connective_technique(
+    musicxml: str,
+    *,
+    part_index: int,
+    measure_number: int,
+    beat_offset: float,
+    technique: str,
+    action: str = "set",
+    voice: int | None = None,
+) -> dict[str, Any]:
+    """Attach or remove a connective guitar technique (hammer-on, pull-off).
+
+    The cursor addresses the *start* note; ``set`` draws the spanner from it to
+    the immediately following note, ``remove`` clears any spanner of this kind
+    starting at the note. Follows the ``/tie/set`` start/stop discipline but
+    keeps a single-cursor authoring gesture (ADR-0020).
+
+    Maps to music21 ``HammerOn``/``PullOff`` spanners → MusicXML
+    ``<hammer-on>``/``<pull-off>`` start/stop pairs.
+    """
+    if technique not in ALLOWED_CONNECTIVE_TECHNIQUES:
+        raise ValueError(
+            f"unsupported technique '{technique}'; "
+            f"allowed: {sorted(ALLOWED_CONNECTIVE_TECHNIQUES)}"
+        )
+    if action not in ("set", "remove"):
+        raise ValueError(f"action must be 'set' or 'remove', got '{action}'")
+
+    cls = ALLOWED_CONNECTIVE_TECHNIQUES[technique]
+    score = _parse(musicxml)
+    part = _get_part(score, part_index)
+    measure = _get_measure(part, measure_number)
+    container = _find_voice_or_measure(measure, voice)
+    start = _find_note_at(container, beat_offset)
+    if start is None or not isinstance(start, m21note.NotRest):
+        raise ValueError(
+            f"No note found at part={part_index} measure={measure_number} beat={beat_offset}"
+        )
+
+    # Remove any existing spanner of this kind starting here (idempotent set,
+    # and the body of remove).
+    removed = 0
+    for sp in list(score.recurse().getElementsByClass(cls)):
+        if sp.getFirst() is start:
+            score.remove(sp, recurse=True)
+            removed += 1
+
+    if action == "remove":
+        return {
+            "musicxml": _serialise(score),
+            "action": "removed" if removed else "unchanged",
+        }
+
+    nxt = _next_notrest_after(part, container, start)
+    if nxt is None:
+        raise ValueError(
+            f"{technique.replace('_', ' ')} needs a following note to connect to; "
+            f"none found after part={part_index} measure={measure_number} beat={beat_offset}"
+        )
+    sp = cls(start, nxt)
+    if isinstance(sp, spanner.Glissando):
+        # A guitar slide reads as a straight line, not the default wavy gliss.
+        sp.lineType = "solid"
+    part.insert(0, sp)  # type: ignore[no-untyped-call]
+    return {
+        "musicxml": _serialise(score),
+        "action": "changed" if removed else "added",
+    }
+
+
+def toggle_technical_marker(
+    musicxml: str,
+    *,
+    part_index: int,
+    measure_number: int,
+    beat_offset: float,
+    marker: str,
+    voice: int | None = None,
+) -> dict[str, Any]:
+    """Toggle a point technical marker on the note at the position (ADR-0020).
+
+    ``marker`` is one of ``ALLOWED_TECHNICAL_MARKERS``: natural/artificial
+    harmonic, vibrato, dead/ghost note, strum up/down. Adds the marker if absent,
+    removes it if present; harmonic and strum variants are mutually exclusive.
+    """
+    if marker not in ALLOWED_TECHNICAL_MARKERS:
+        raise ValueError(
+            f"unsupported marker '{marker}'; allowed: {list(ALLOWED_TECHNICAL_MARKERS)}"
+        )
+    score = _parse(musicxml)
+    part = _get_part(score, part_index)
+    measure = _get_measure(part, measure_number)
+    container = _find_voice_or_measure(measure, voice)
+    note = _find_note_at(container, beat_offset)
+    if note is None or not isinstance(note, m21note.NotRest):
+        raise ValueError(
+            f"No note found at part={part_index} measure={measure_number} beat={beat_offset}"
+        )
+
+    if marker in ("natural_harmonic", "artificial_harmonic"):
+        htype = "natural" if marker == "natural_harmonic" else "artificial"
+        had = any(
+            isinstance(a, articulations.StringHarmonic) and a.harmonicType == htype
+            for a in note.articulations
+        )
+        # Harmonic type is mutually exclusive — drop any existing one first.
+        note.articulations = [
+            a for a in note.articulations if not isinstance(a, articulations.StringHarmonic)
+        ]
+        if had:
+            action = "removed"
+        else:
+            harmonic = articulations.StringHarmonic()
+            harmonic.harmonicType = htype
+            note.articulations.append(harmonic)
+            action = "added"
+    elif marker in ("strum_up", "strum_down"):
+        direction = "up" if marker == "strum_up" else "down"
+        had = any(
+            isinstance(e, expressions.ArpeggioMark) and e.type == direction
+            for e in note.expressions
+        )
+        note.expressions = [
+            e for e in note.expressions if not isinstance(e, expressions.ArpeggioMark)
+        ]
+        if had:
+            action = "removed"
+        else:
+            note.expressions.append(expressions.ArpeggioMark(direction))
+            action = "added"
+    elif marker == "dead_note":
+        if note.notehead == "x":
+            note.notehead = "normal"
+            action = "removed"
+        else:
+            note.notehead = "x"
+            action = "added"
+    elif marker == "ghost_note":
+        if note.noteheadParenthesis:
+            note.noteheadParenthesis = False
+            action = "removed"
+        else:
+            note.noteheadParenthesis = True
+            action = "added"
+    else:  # vibrato — a single-note wavy line (TrillExtension spanner)
+        existing_vib = [
+            sp
+            for sp in score.recurse().getElementsByClass(expressions.TrillExtension)
+            if sp.getFirst() is note
+        ]
+        if existing_vib:
+            for sp in existing_vib:
+                score.remove(sp, recurse=True)
+            action = "removed"
+        else:
+            part.insert(0, expressions.TrillExtension(note, note))  # type: ignore[no-untyped-call]
+            action = "added"
+
+    return {"musicxml": _serialise(score), "action": action}
+
+
+def set_bracket_span(
+    musicxml: str,
+    *,
+    part_index: int,
+    measure_number: int,
+    beat_offset: float,
+    technique: str,
+    action: str = "set",
+    end_measure_number: int | None = None,
+    end_beat_offset: float | None = None,
+    voice: int | None = None,
+) -> dict[str, Any]:
+    """Set or clear a bracketed-span technique (palm mute, let ring).
+
+    The cursor addresses the *start* note. ``set`` draws a bracket to the end
+    note — given explicitly via ``end_measure_number``/``end_beat_offset``, or
+    defaulting to the last note of the start note's measure. ``remove`` clears
+    any bracket starting at the note. Follows the ``/tie/set`` start/stop
+    discipline; renders as a music21 ``Line`` → MusicXML ``<bracket>`` (ADR-0020).
+    """
+    if technique not in ALLOWED_BRACKET_SPANS:
+        raise ValueError(
+            f"unsupported span technique '{technique}'; allowed: {sorted(ALLOWED_BRACKET_SPANS)}"
+        )
+    if action not in ("set", "remove"):
+        raise ValueError(f"action must be 'set' or 'remove', got '{action}'")
+
+    score = _parse(musicxml)
+    part = _get_part(score, part_index)
+    measure = _get_measure(part, measure_number)
+    container = _find_voice_or_measure(measure, voice)
+    start = _find_note_at(container, beat_offset)
+    if start is None or not isinstance(start, m21note.NotRest):
+        raise ValueError(
+            f"No note found at part={part_index} measure={measure_number} beat={beat_offset}"
+        )
+
+    removed = 0
+    for sp in list(score.recurse().getElementsByClass(spanner.Line)):
+        if sp.getFirst() is start:
+            score.remove(sp, recurse=True)
+            removed += 1
+
+    if action == "remove":
+        return {
+            "musicxml": _serialise(score),
+            "action": "removed" if removed else "unchanged",
+        }
+
+    if end_measure_number is not None and end_beat_offset is not None:
+        end_measure = _get_measure(part, end_measure_number)
+        end_container = _find_voice_or_measure(end_measure, voice)
+        end = _find_note_at(end_container, end_beat_offset)
+    else:
+        here = _notrests_in(container)
+        end = here[-1] if here else start
+    if end is None or not isinstance(end, m21note.NotRest):
+        raise ValueError("Could not resolve the end note for the bracketed span.")
+
+    line = spanner.Line(start, end)
+    line.lineType = ALLOWED_BRACKET_SPANS[technique]
+    part.insert(0, line)  # type: ignore[no-untyped-call]
+    return {
+        "musicxml": _serialise(score),
+        "action": "changed" if removed else "added",
+    }
 
 
 def set_dynamic(

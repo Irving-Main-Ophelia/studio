@@ -27,6 +27,7 @@ from __future__ import annotations
 import copy
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
+from typing import Any
 
 from app.tools.fretboard import (
     DEFAULT_MAX_FRET,
@@ -105,6 +106,73 @@ def project_view(
             )
         ],
     )
+
+
+def reassign_fret_positions(
+    musicxml: str,
+    *,
+    part_index: int,
+    tuning: list[str] | None = None,
+    capo: int = 0,
+    max_fret: int = DEFAULT_MAX_FRET,
+) -> dict[str, Any]:
+    """Recompute every note's ``<string>/<fret>`` in a part from its current pitch.
+
+    This is the tab side of Pillar-2 respelling (PHASE_4 A3): after a transposition
+    or a tuning/capo change, fretboard positions must follow the new pitches and the
+    part's tuning. Unlike the tab *projection* — which preserves an authored position
+    — this **rewrites** positions, so it is an explicit edit of the canonical score.
+    A note unplayable in the tuning loses its position rather than misstate the pitch.
+
+    Returns the new MusicXML plus counts of positions reassigned and cleared.
+    """
+    tuning = list(tuning) if tuning else list(STANDARD_TUNING)
+    root = ET.fromstring(musicxml)
+    parts = root.findall("part")
+    if not parts:
+        raise ValueError("no <part> in score")
+    if not (0 <= part_index < len(parts)):
+        raise ValueError(f"part_index {part_index} out of range (0..{len(parts) - 1})")
+
+    reassigned = 0
+    cleared = 0
+    for measure in parts[part_index].findall("measure"):
+        for note in measure.findall("note"):
+            pitch = note.find("pitch")
+            if pitch is None:  # rest
+                continue
+            step = (pitch.findtext("step") or "").strip()
+            octave_txt = pitch.findtext("octave")
+            if not step or octave_txt is None:
+                continue
+            alter = int(float(pitch.findtext("alter") or "0"))
+            midi = step_alter_octave_to_midi(step, alter, int(octave_txt))
+            pos = assign_fret(midi, tuning, capo, max_fret)
+
+            technical = _find_or_none_technical(note)
+            if technical is not None:
+                for tag in ("string", "fret"):
+                    for el in technical.findall(tag):
+                        technical.remove(el)
+
+            if pos is None:
+                cleared += 1
+                continue
+
+            if technical is None:
+                notations = note.find("notations")
+                if notations is None:
+                    notations = ET.Element("notations")
+                    _insert_before_lyric(note, notations)
+                technical = ET.SubElement(notations, "technical")
+            s = ET.SubElement(technical, "string")
+            s.text = str(pos.string)
+            f = ET.SubElement(technical, "fret")
+            f.text = str(pos.fret)
+            reassigned += 1
+
+    out = '<?xml version="1.0" encoding="UTF-8"?>\n' + ET.tostring(root, encoding="unicode")
+    return {"musicxml": out, "reassigned": reassigned, "cleared": cleared}
 
 
 def _apply_to_part(part: ET.Element, spec: PartView) -> None:

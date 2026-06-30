@@ -21,7 +21,10 @@ logger = logging.getLogger(__name__)
 
 from app.tools.score_edit import (
     ALLOWED_ARTICULATIONS,
+    ALLOWED_BRACKET_SPANS,
+    ALLOWED_CONNECTIVE_TECHNIQUES,
     ALLOWED_DYNAMICS,
+    ALLOWED_TECHNICAL_MARKERS,
     append_measure,
     change_note_duration,
     change_note_pitch,
@@ -32,10 +35,14 @@ from app.tools.score_edit import (
     list_notes,
     remove_note,
     respell_note,
+    set_bend,
+    set_bracket_span,
+    set_connective_technique,
     set_dynamic,
     set_key_signature,
     set_tie,
     toggle_articulation,
+    toggle_technical_marker,
     transpose_note_semitones,
 )
 
@@ -83,6 +90,67 @@ class ArticulationIn(_Common):
 
 class TieIn(_Common):
     tie_type: Literal["start", "stop", "continue", "none"]
+
+
+class BendIn(_Common):
+    bend_alter: int = Field(
+        ..., description="Bend target in semitones (+ up, − down); 0 removes the bend."
+    )
+    pre_bend: bool = Field(False, description="String already bent at the note's onset.")
+    release: float | None = Field(
+        None, ge=0.0, description="Quarter-length offset at which the bend is released."
+    )
+
+
+class ConnectiveTechniqueIn(_Common):
+    technique: Literal["hammer_on", "pull_off", "slide"]
+    action: Literal["set", "remove"] = "set"
+
+    @field_validator("technique")
+    @classmethod
+    def _allowed(cls, v: str) -> str:
+        if v not in ALLOWED_CONNECTIVE_TECHNIQUES:
+            raise ValueError(
+                f"Unsupported technique '{v}'. Allowed: {sorted(ALLOWED_CONNECTIVE_TECHNIQUES)}"
+            )
+        return v
+
+
+class TechnicalMarkerIn(_Common):
+    marker: Literal[
+        "natural_harmonic",
+        "artificial_harmonic",
+        "vibrato",
+        "dead_note",
+        "ghost_note",
+        "strum_up",
+        "strum_down",
+    ]
+
+    @field_validator("marker")
+    @classmethod
+    def _allowed(cls, v: str) -> str:
+        if v not in ALLOWED_TECHNICAL_MARKERS:
+            raise ValueError(
+                f"Unsupported marker '{v}'. Allowed: {list(ALLOWED_TECHNICAL_MARKERS)}"
+            )
+        return v
+
+
+class BracketSpanIn(_Common):
+    technique: Literal["palm_mute", "let_ring"]
+    action: Literal["set", "remove"] = "set"
+    end_measure_number: int | None = Field(None, ge=1)
+    end_beat_offset: float | None = Field(None, ge=0.0)
+
+    @field_validator("technique")
+    @classmethod
+    def _allowed(cls, v: str) -> str:
+        if v not in ALLOWED_BRACKET_SPANS:
+            raise ValueError(
+                f"Unsupported span technique '{v}'. Allowed: {sorted(ALLOWED_BRACKET_SPANS)}"
+            )
+        return v
 
 
 class DynamicIn(BaseModel):
@@ -197,6 +265,10 @@ class ToggleResponse(MusicxmlOnly):
     action: Literal["added", "removed"]
 
 
+class TechnicalResponse(MusicxmlOnly):
+    action: Literal["added", "removed", "changed", "unchanged"]
+
+
 class AppendMeasureResponse(MusicxmlOnly):
     new_measure_number: int
 
@@ -295,6 +367,80 @@ def route_tie(req: TieIn) -> MusicxmlOnly:
                 measure_number=req.measure_number,
                 beat_offset=req.beat_offset,
                 tie_type=req.tie_type,
+                voice=req.voice,
+            )
+        )
+    except Exception as exc:
+        raise _route_error(exc) from exc
+
+
+@router.post("/technical/bend", response_model=TechnicalResponse)
+def route_bend(req: BendIn) -> TechnicalResponse:
+    try:
+        return TechnicalResponse(
+            **set_bend(
+                req.musicxml,
+                part_index=req.part_index,
+                measure_number=req.measure_number,
+                beat_offset=req.beat_offset,
+                bend_alter=req.bend_alter,
+                pre_bend=req.pre_bend,
+                release=req.release,
+                voice=req.voice,
+            )
+        )
+    except Exception as exc:
+        raise _route_error(exc) from exc
+
+
+@router.post("/technical/connect", response_model=TechnicalResponse)
+def route_connect(req: ConnectiveTechniqueIn) -> TechnicalResponse:
+    try:
+        return TechnicalResponse(
+            **set_connective_technique(
+                req.musicxml,
+                part_index=req.part_index,
+                measure_number=req.measure_number,
+                beat_offset=req.beat_offset,
+                technique=req.technique,
+                action=req.action,
+                voice=req.voice,
+            )
+        )
+    except Exception as exc:
+        raise _route_error(exc) from exc
+
+
+@router.post("/technical/toggle", response_model=TechnicalResponse)
+def route_technical_marker(req: TechnicalMarkerIn) -> TechnicalResponse:
+    try:
+        return TechnicalResponse(
+            **toggle_technical_marker(
+                req.musicxml,
+                part_index=req.part_index,
+                measure_number=req.measure_number,
+                beat_offset=req.beat_offset,
+                marker=req.marker,
+                voice=req.voice,
+            )
+        )
+    except Exception as exc:
+        raise _route_error(exc) from exc
+
+
+@router.post("/technical/span", response_model=TechnicalResponse)
+def route_bracket_span(req: BracketSpanIn) -> TechnicalResponse:
+    try:
+        return TechnicalResponse(
+            **set_bracket_span(
+                req.musicxml,
+                part_index=req.part_index,
+                measure_number=req.measure_number,
+                beat_offset=req.beat_offset,
+                technique=req.technique,
+                action=req.action,
+                end_measure_number=req.end_measure_number,
+                end_beat_offset=req.end_beat_offset,
                 voice=req.voice,
             )
         )

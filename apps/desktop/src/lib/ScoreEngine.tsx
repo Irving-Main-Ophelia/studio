@@ -56,6 +56,7 @@ import {
 } from "../project/OperationLog";
 import { projectPersistence } from "../project/persistence";
 import type {
+  GuitarConfig,
   NewProjectSpec,
   OperationRecord,
   ProjectHandle,
@@ -69,6 +70,9 @@ import {
   type Articulation,
   type ChatMessage,
   type Dynamic,
+  type GuitarBracketSpan,
+  type GuitarConnective,
+  type GuitarMarker,
   type ExtractedScore,
   type KeyEstimate,
   type ListedNoteRow,
@@ -156,6 +160,18 @@ interface ScoreEngineValue {
   editNoteDuration: (note: SelectedNote, duration_quarters: number) => Promise<void>;
   editNoteArticulation: (note: SelectedNote, articulation: Articulation) => Promise<void>;
   editNoteDynamic: (note: SelectedNote, dynamic: Dynamic) => Promise<void>;
+  /** Set/clear a string bend on a note; bend_alter in semitones, 0 removes (ADR-0020). */
+  editNoteBend: (note: SelectedNote, bend_alter: number) => Promise<void>;
+  /** Connect a note to the next with a hammer-on / pull-off / slide (ADR-0020). */
+  editNoteConnective: (
+    note: SelectedNote,
+    technique: GuitarConnective,
+    action?: "set" | "remove",
+  ) => Promise<void>;
+  /** Toggle a point guitar marker (harmonic, vibrato, dead/ghost, strum) on a note (ADR-0020). */
+  editNoteMarker: (note: SelectedNote, marker: GuitarMarker) => Promise<void>;
+  /** Set a bracketed-span technique (palm mute, let ring) from a note to its measure end (ADR-0020). */
+  editNoteSpan: (note: SelectedNote, technique: GuitarBracketSpan) => Promise<void>;
   editNoteRespell: (note: SelectedNote) => Promise<void>;
   editNotePitch: (note: SelectedNote, pitch: string) => Promise<void>;
   transposeNote: (note: SelectedNote, semitones: number) => Promise<void>;
@@ -186,6 +202,10 @@ interface ScoreEngineValue {
   renameProject: (newTitle: string) => Promise<void>;
   /** Persist a part's notation view (staff/tab/both) into project.json (Track A, A1). */
   setPartViewMode: (partIndex: number, viewMode: ViewMode) => Promise<void>;
+  /** Persist any per-part guitar config (tuning/capo/profile/view) into project.json (A3). */
+  setPartGuitarConfig: (partIndex: number, patch: Partial<GuitarConfig>) => Promise<void>;
+  /** Rewrite a part's tab positions from its current pitches + tuning/capo (A3 respelling). */
+  refretPart: (partIndex: number) => Promise<void>;
   deleteProject: (path: string) => Promise<void>;
   acceptPendingRecovery: () => Promise<void>;
   discardPendingRecovery: () => void;
@@ -635,8 +655,8 @@ export function ScoreEngineProvider({ children }: { children: React.ReactNode })
     [project, refreshRecents],
   );
 
-  const setPartViewMode = useCallback(
-    async (partIndex: number, viewMode: ViewMode) => {
+  const setPartGuitarConfig = useCallback(
+    async (partIndex: number, patch: Partial<GuitarConfig>) => {
       if (!project) return;
       const instrumentation = project.meta.instrumentation.map((entry, i) => {
         if (i !== partIndex) return entry;
@@ -646,7 +666,7 @@ export function ScoreEngineProvider({ children }: { children: React.ReactNode })
           profile: "nylon",
           view_mode: "staff" as ViewMode,
         };
-        return { ...entry, guitar: { ...guitar, view_mode: viewMode } };
+        return { ...entry, guitar: { ...guitar, ...patch } };
       });
       const next: ProjectHandle = {
         ...project,
@@ -655,6 +675,11 @@ export function ScoreEngineProvider({ children }: { children: React.ReactNode })
       await persistProjectSave(next, score?.musicxml ?? next.score_musicxml, null);
     },
     [project, score, persistProjectSave],
+  );
+
+  const setPartViewMode = useCallback(
+    (partIndex: number, viewMode: ViewMode) => setPartGuitarConfig(partIndex, { view_mode: viewMode }),
+    [setPartGuitarConfig],
   );
 
   const deleteProject = useCallback(
@@ -1367,6 +1392,158 @@ export function ScoreEngineProvider({ children }: { children: React.ReactNode })
     [applyEditOp, resolveNoteForApi],
   );
 
+  const editNoteBend = useCallback(
+    async (note: SelectedNote, bend_alter: number) => {
+      const current = scoreRef.current;
+      if (!current) return;
+      setEditorBusy(true);
+      setEditorError(null);
+      try {
+        const target = await resolveNoteForApi(note);
+        const result = await api.setBend({
+          musicxml: current.musicxml,
+          part_index: target.part_index,
+          measure_number: target.measure_number,
+          beat_offset: target.beat_offset,
+          voice: target.voice,
+          bend_alter,
+        });
+        await applyEditOp(
+          result.musicxml,
+          bend_alter === 0 ? "Remove bend" : `Bend ${bend_alter > 0 ? "+" : ""}${bend_alter} st`,
+        );
+      } catch (err) {
+        setEditorError(userFacingEditMessage(err));
+      } finally {
+        setEditorBusy(false);
+      }
+    },
+    [applyEditOp, resolveNoteForApi],
+  );
+
+  const editNoteConnective = useCallback(
+    async (note: SelectedNote, technique: GuitarConnective, action: "set" | "remove" = "set") => {
+      const current = scoreRef.current;
+      if (!current) return;
+      setEditorBusy(true);
+      setEditorError(null);
+      try {
+        const target = await resolveNoteForApi(note);
+        const result = await api.setConnectiveTechnique({
+          musicxml: current.musicxml,
+          part_index: target.part_index,
+          measure_number: target.measure_number,
+          beat_offset: target.beat_offset,
+          voice: target.voice,
+          technique,
+          action,
+        });
+        const label =
+          technique === "hammer_on" ? "Hammer-on" : technique === "pull_off" ? "Pull-off" : "Slide";
+        await applyEditOp(
+          result.musicxml,
+          result.action === "removed" ? `Remove ${label}` : `${label} to next`,
+        );
+      } catch (err) {
+        setEditorError(userFacingEditMessage(err));
+      } finally {
+        setEditorBusy(false);
+      }
+    },
+    [applyEditOp, resolveNoteForApi],
+  );
+
+  const editNoteMarker = useCallback(
+    async (note: SelectedNote, marker: GuitarMarker) => {
+      const current = scoreRef.current;
+      if (!current) return;
+      setEditorBusy(true);
+      setEditorError(null);
+      try {
+        const target = await resolveNoteForApi(note);
+        const result = await api.toggleTechnicalMarker({
+          musicxml: current.musicxml,
+          part_index: target.part_index,
+          measure_number: target.measure_number,
+          beat_offset: target.beat_offset,
+          voice: target.voice,
+          marker,
+        });
+        const label = marker.replace(/_/g, " ");
+        await applyEditOp(
+          result.musicxml,
+          `${result.action === "removed" ? "Remove" : "Add"} ${label}`,
+        );
+      } catch (err) {
+        setEditorError(userFacingEditMessage(err));
+      } finally {
+        setEditorBusy(false);
+      }
+    },
+    [applyEditOp, resolveNoteForApi],
+  );
+
+  const editNoteSpan = useCallback(
+    async (note: SelectedNote, technique: GuitarBracketSpan) => {
+      const current = scoreRef.current;
+      if (!current) return;
+      setEditorBusy(true);
+      setEditorError(null);
+      try {
+        const target = await resolveNoteForApi(note);
+        // From the menu we span to the end of the note's measure (a guitarist's
+        // "palm-mute the rest of this bar"); the agent can pass an explicit range.
+        const result = await api.setBracketSpan({
+          musicxml: current.musicxml,
+          part_index: target.part_index,
+          measure_number: target.measure_number,
+          beat_offset: target.beat_offset,
+          voice: target.voice,
+          technique,
+          action: "set",
+        });
+        const label = technique === "palm_mute" ? "Palm mute" : "Let ring";
+        await applyEditOp(
+          result.musicxml,
+          result.action === "removed" ? `Remove ${label}` : `${label} (to bar end)`,
+        );
+      } catch (err) {
+        setEditorError(userFacingEditMessage(err));
+      } finally {
+        setEditorBusy(false);
+      }
+    },
+    [applyEditOp, resolveNoteForApi],
+  );
+
+  const refretPart = useCallback(
+    async (partIndex: number) => {
+      const current = scoreRef.current;
+      if (!current) return;
+      const guitar = project?.meta.instrumentation[partIndex]?.guitar ?? null;
+      setEditorBusy(true);
+      setEditorError(null);
+      try {
+        const result = await api.refretPart({
+          musicxml: current.musicxml,
+          part_index: partIndex,
+          tuning: guitar?.tuning ?? null,
+          capo: guitar?.capo ?? 0,
+        });
+        await applyEditOp(
+          result.musicxml,
+          `Refret part ${partIndex + 1} (${result.reassigned} positions` +
+            (result.cleared ? `, ${result.cleared} cleared)` : ")"),
+        );
+      } catch (err) {
+        setEditorError(userFacingEditMessage(err));
+      } finally {
+        setEditorBusy(false);
+      }
+    },
+    [project, applyEditOp],
+  );
+
   const editNoteRespell = useCallback(
     async (note: SelectedNote) => {
       const current = scoreRef.current;
@@ -1701,6 +1878,8 @@ export function ScoreEngineProvider({ children }: { children: React.ReactNode })
       saveProject,
       renameProject,
       setPartViewMode,
+      setPartGuitarConfig,
+      refretPart,
       deleteProject,
       acceptPendingRecovery,
       discardPendingRecovery,
@@ -1741,6 +1920,10 @@ export function ScoreEngineProvider({ children }: { children: React.ReactNode })
       editNoteDuration,
       editNoteArticulation,
       editNoteDynamic,
+      editNoteBend,
+      editNoteConnective,
+      editNoteMarker,
+      editNoteSpan,
       editNoteRespell,
       editNotePitch,
       transposeNote,
@@ -1787,6 +1970,8 @@ export function ScoreEngineProvider({ children }: { children: React.ReactNode })
       saveProject,
       renameProject,
       setPartViewMode,
+      setPartGuitarConfig,
+      refretPart,
       deleteProject,
       acceptPendingRecovery,
       discardPendingRecovery,
@@ -1835,6 +2020,10 @@ export function ScoreEngineProvider({ children }: { children: React.ReactNode })
       editNoteDuration,
       editNoteArticulation,
       editNoteDynamic,
+      editNoteBend,
+      editNoteConnective,
+      editNoteMarker,
+      editNoteSpan,
       editNoteRespell,
       editNotePitch,
       transposeNote,

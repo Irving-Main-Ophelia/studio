@@ -6,7 +6,13 @@ import { ArrowDown, ArrowUp, Music2, Trash2, Type } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import type { SelectedNote } from "../editor/SelectionState";
-import type { Articulation, Dynamic } from "../lib/api";
+import type {
+  Articulation,
+  Dynamic,
+  GuitarBracketSpan,
+  GuitarConnective,
+  GuitarMarker,
+} from "../lib/api";
 import { useViewportMenuPosition } from "./useViewportMenuPosition";
 
 const LETTERS = ["C", "D", "E", "F", "G", "A", "B"] as const;
@@ -21,6 +27,32 @@ const DURATIONS: Array<{ label: string; quarters: number }> = [
 
 const ARTICULATIONS: Articulation[] = ["staccato", "accent", "marcato", "tenuto", "fermata"];
 const DYNAMICS: Dynamic[] = ["ppp", "pp", "p", "mp", "mf", "f", "ff", "fff"];
+
+// Bend targets in semitones (ADR-0020). 0 clears the bend.
+const BENDS: Array<{ label: string; alter: number }> = [
+  { label: "½", alter: 1 },
+  { label: "Full", alter: 2 },
+  { label: "1½", alter: 3 },
+  { label: "↓ Full", alter: -2 },
+];
+const CONNECTIVES: Array<{ label: string; technique: GuitarConnective }> = [
+  { label: "Hammer-on →", technique: "hammer_on" },
+  { label: "Pull-off →", technique: "pull_off" },
+  { label: "Slide →", technique: "slide" },
+];
+const MARKERS: Array<{ label: string; marker: GuitarMarker }> = [
+  { label: "Harm. nat.", marker: "natural_harmonic" },
+  { label: "Harm. art.", marker: "artificial_harmonic" },
+  { label: "Vibrato", marker: "vibrato" },
+  { label: "Dead", marker: "dead_note" },
+  { label: "Ghost", marker: "ghost_note" },
+  { label: "Strum ↑", marker: "strum_up" },
+  { label: "Strum ↓", marker: "strum_down" },
+];
+const SPANS: Array<{ label: string; technique: GuitarBracketSpan }> = [
+  { label: "Palm mute", technique: "palm_mute" },
+  { label: "Let ring", technique: "let_ring" },
+];
 
 function parseOctave(pitch: string): number {
   const m = pitch.match(/(\d+)\s*$/);
@@ -44,6 +76,14 @@ export interface NoteEditMenuProps {
   onPitch: (pitch: string) => void;
   onTranspose: (semitones: number) => void;
   onRemove: () => void;
+  /** Guitar bend; bendAlter in semitones, 0 clears (ADR-0020). Section hidden when absent. */
+  onBend?: (bendAlter: number) => void;
+  /** Guitar hammer-on / pull-off / slide to the next note (ADR-0020). Section hidden when absent. */
+  onConnective?: (technique: GuitarConnective) => void;
+  /** Toggle a point guitar marker (harmonic, vibrato, dead/ghost, strum) (ADR-0020). */
+  onMarker?: (marker: GuitarMarker) => void;
+  /** Bracketed span (palm mute, let ring) from this note to the bar end (ADR-0020). */
+  onSpan?: (technique: GuitarBracketSpan) => void;
   busy?: boolean;
 }
 
@@ -60,6 +100,10 @@ export function NoteEditMenu({
   onPitch,
   onTranspose,
   onRemove,
+  onBend,
+  onConnective,
+  onMarker,
+  onSpan,
   busy = false,
 }: NoteEditMenuProps) {
   const ref = useRef<HTMLDivElement>(null);
@@ -214,6 +258,80 @@ export function NoteEditMenu({
             ))}
           </div>
         </Section>
+
+        {(onBend || onConnective || onMarker || onSpan) && !chord && (
+          <Section title="Guitar">
+            {onBend && (
+              <div className="mb-1 flex flex-wrap items-center gap-1">
+                <span className="text-[9px] text-zinc-500">Bend</span>
+                {BENDS.map((b) => (
+                  <button
+                    key={b.alter}
+                    type="button"
+                    disabled={busy}
+                    onClick={() => onBend(b.alter)}
+                    className="rounded bg-obsidian-800 px-2 py-1 hover:bg-neon-amber/20 hover:text-neon-amber"
+                  >
+                    {b.label}
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => onBend(0)}
+                  className="rounded bg-obsidian-800 px-2 py-1 text-zinc-400 hover:bg-obsidian-700"
+                >
+                  Clear
+                </button>
+              </div>
+            )}
+            {onConnective && (
+              <div className="mb-1 flex flex-wrap gap-1">
+                {CONNECTIVES.map((c) => (
+                  <button
+                    key={c.technique}
+                    type="button"
+                    disabled={busy}
+                    onClick={() => onConnective(c.technique)}
+                    className="rounded bg-obsidian-800 px-2 py-1 hover:bg-neon-cyan/20 hover:text-neon-cyan"
+                  >
+                    {c.label}
+                  </button>
+                ))}
+              </div>
+            )}
+            {onMarker && (
+              <div className="mb-1 flex flex-wrap gap-1">
+                {MARKERS.map((m) => (
+                  <button
+                    key={m.marker}
+                    type="button"
+                    disabled={busy}
+                    onClick={() => onMarker(m.marker)}
+                    className="rounded bg-obsidian-800 px-2 py-1 hover:bg-neon-violet/20 hover:text-neon-violet"
+                  >
+                    {m.label}
+                  </button>
+                ))}
+              </div>
+            )}
+            {onSpan && (
+              <div className="flex flex-wrap gap-1">
+                {SPANS.map((s) => (
+                  <button
+                    key={s.technique}
+                    type="button"
+                    disabled={busy}
+                    onClick={() => onSpan(s.technique)}
+                    className="rounded bg-obsidian-800 px-2 py-1 hover:bg-neon-amber/20 hover:text-neon-amber"
+                  >
+                    {s.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </Section>
+        )}
       </div>
 
       <div className="shrink-0 border-t border-obsidian-700 px-3 py-2">

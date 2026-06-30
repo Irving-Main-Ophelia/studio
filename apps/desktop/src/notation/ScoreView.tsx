@@ -2,7 +2,13 @@ import { useEffect, useRef, useState } from "react";
 import type { OpenSheetMusicDisplay } from "opensheetmusicdisplay";
 
 import type { MeasureRange, SelectedNote } from "../editor/SelectionState";
-import type { Articulation, Dynamic } from "../lib/api";
+import type {
+  Articulation,
+  Dynamic,
+  GuitarBracketSpan,
+  GuitarConnective,
+  GuitarMarker,
+} from "../lib/api";
 import { EditLayer } from "./EditLayer";
 import { ScoreEmptyState } from "./ScoreEmptyState";
 import { annotateScoreNotes } from "./osmdAnnotate";
@@ -34,6 +40,10 @@ interface ScoreViewProps {
   onNoteDuration?: (note: SelectedNote, quarters: number) => void;
   onNoteArticulation?: (note: SelectedNote, articulation: Articulation) => void;
   onNoteDynamic?: (note: SelectedNote, dynamic: Dynamic) => void;
+  onNoteBend?: (note: SelectedNote, bendAlter: number) => void;
+  onNoteConnective?: (note: SelectedNote, technique: GuitarConnective) => void;
+  onNoteMarker?: (note: SelectedNote, marker: GuitarMarker) => void;
+  onNoteSpan?: (note: SelectedNote, technique: GuitarBracketSpan) => void;
   onNoteRespell?: (note: SelectedNote) => void;
   onNotePitch?: (note: SelectedNote, pitch: string) => void;
   onNoteTranspose?: (note: SelectedNote, semitones: number) => void;
@@ -67,6 +77,10 @@ export function ScoreView({
   onNoteDuration,
   onNoteArticulation,
   onNoteDynamic,
+  onNoteBend,
+  onNoteConnective,
+  onNoteMarker,
+  onNoteSpan,
   onNoteRespell,
   onNotePitch,
   onNoteTranspose,
@@ -196,6 +210,12 @@ export function ScoreView({
             onDuration={(n, q) => onNoteDuration?.(n, q)}
             onArticulation={(n, a) => onNoteArticulation?.(n, a)}
             onDynamic={(n, d) => onNoteDynamic?.(n, d)}
+            onBend={onNoteBend ? (n, alter) => onNoteBend(n, alter) : undefined}
+            onConnective={
+              onNoteConnective ? (n, technique) => onNoteConnective(n, technique) : undefined
+            }
+            onMarker={onNoteMarker ? (n, marker) => onNoteMarker(n, marker) : undefined}
+            onSpan={onNoteSpan ? (n, technique) => onNoteSpan(n, technique) : undefined}
             onRespell={(n) => onNoteRespell?.(n)}
             onPitch={(n, p) => onNotePitch?.(n, p)}
             onTranspose={(n, st) => onNoteTranspose?.(n, st)}

@@ -6,11 +6,30 @@
 
 export const PROJECT_SCHEMA_VERSION = 3 as const;
 
-/** How a part renders (Track A, A1). */
-export type ViewMode = "staff" | "tab" | "both";
+/** How a part renders (Track A, A1 + A8). "lead" = slash + chord symbols. */
+export type ViewMode = "staff" | "tab" | "both" | "lead";
 
 /** Standard 6-string guitar tuning, string 1 (high E) first. */
 export const STANDARD_GUITAR_TUNING: string[] = ["E4", "B3", "G3", "D3", "A2", "E2"];
+
+/**
+ * Named tunings that ship in M4.2 (mirrors backend `fretboard.TUNINGS`; ADR-0018,
+ * PHASE_4 §4.7 Q1). Custom tunings are an explicit pitch array, so N-string is data.
+ */
+export const GUITAR_TUNING_PRESETS: Record<string, string[]> = {
+  standard: ["E4", "B3", "G3", "D3", "A2", "E2"],
+  drop_d: ["E4", "B3", "G3", "D3", "A2", "D2"],
+  dadgad: ["D4", "A3", "G3", "D3", "A2", "D2"],
+  bass_standard: ["G2", "D2", "A1", "E1"],
+};
+
+/** Match a tuning array to a preset id, or "custom" when it matches none. */
+export function tuningPresetId(tuning: string[]): string {
+  for (const [id, preset] of Object.entries(GUITAR_TUNING_PRESETS)) {
+    if (preset.length === tuning.length && preset.every((p, i) => p === tuning[i])) return id;
+  }
+  return "custom";
+}
 
 /**
  * Per-part guitar/fretted-instrument metadata (schema v3 — ADR-0018). Absent on

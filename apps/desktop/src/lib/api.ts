@@ -126,6 +126,11 @@ export interface ToggleResult {
   action: "added" | "removed";
 }
 
+export interface TechnicalResult {
+  musicxml: string;
+  action: "added" | "removed" | "changed" | "unchanged";
+}
+
 export interface AppendMeasureResult {
   musicxml: string;
   new_measure_number: number;
@@ -134,6 +139,58 @@ export interface AppendMeasureResult {
 export type Articulation = "staccato" | "accent" | "marcato" | "tenuto" | "fermata";
 export type Dynamic = "ppp" | "pp" | "p" | "mp" | "mf" | "f" | "ff" | "fff";
 export type TieType = "start" | "stop" | "continue" | "none";
+/** Connective guitar techniques drawn from a note to the next (ADR-0020). */
+export type GuitarConnective = "hammer_on" | "pull_off" | "slide";
+/** Point guitar markers toggled on a single note (ADR-0020). */
+export type GuitarMarker =
+  | "natural_harmonic"
+  | "artificial_harmonic"
+  | "vibrato"
+  | "dead_note"
+  | "ghost_note"
+  | "strum_up"
+  | "strum_down";
+/** Bracketed-span guitar techniques drawn across a range (ADR-0020). */
+export type GuitarBracketSpan = "palm_mute" | "let_ring";
+
+export interface FretboardPosition {
+  string: number;
+  fret: number;
+  midi: number;
+  pitch: string;
+  is_root: boolean;
+}
+
+export interface ChordVoicing {
+  positions: FretboardPosition[];
+  base_fret: number;
+  fret_span: number;
+  lowest_pitch: string;
+  root_in_bass: boolean;
+  difficulty: string;
+}
+
+export interface ChordVoicingsResult {
+  chord: string;
+  root_pc: number;
+  pitch_classes: number[];
+  voicings: ChordVoicing[];
+  count: number;
+}
+
+export interface ScalePosition extends FretboardPosition {
+  degree: number;
+}
+
+export interface ScaleShapeResult {
+  tonic: string;
+  scale: string;
+  pitch_classes: number[];
+  tonic_pc: number;
+  positions: ScalePosition[];
+  min_fret: number;
+  max_fret: number;
+}
 
 export interface ListedNoteRow {
   part_index: number;
@@ -245,6 +302,50 @@ export const api = {
     voice?: number | null;
   }) => post<{ musicxml: string }>("/score/edit/tie/set", req),
 
+  // Guitar techniques (Track A, A2 — ADR-0020). Bend is a point articulation;
+  // hammer-on/pull-off are connective spanners to the following note.
+  setBend: (req: {
+    musicxml: string;
+    part_index: number;
+    measure_number: number;
+    beat_offset: number;
+    bend_alter: number;
+    pre_bend?: boolean;
+    release?: number | null;
+    voice?: number | null;
+  }) => post<TechnicalResult>("/score/edit/technical/bend", req),
+
+  setConnectiveTechnique: (req: {
+    musicxml: string;
+    part_index: number;
+    measure_number: number;
+    beat_offset: number;
+    technique: GuitarConnective;
+    action?: "set" | "remove";
+    voice?: number | null;
+  }) => post<TechnicalResult>("/score/edit/technical/connect", req),
+
+  toggleTechnicalMarker: (req: {
+    musicxml: string;
+    part_index: number;
+    measure_number: number;
+    beat_offset: number;
+    marker: GuitarMarker;
+    voice?: number | null;
+  }) => post<TechnicalResult>("/score/edit/technical/toggle", req),
+
+  setBracketSpan: (req: {
+    musicxml: string;
+    part_index: number;
+    measure_number: number;
+    beat_offset: number;
+    technique: GuitarBracketSpan;
+    action?: "set" | "remove";
+    end_measure_number?: number | null;
+    end_beat_offset?: number | null;
+    voice?: number | null;
+  }) => post<TechnicalResult>("/score/edit/technical/span", req),
+
   setDynamic: (req: {
     musicxml: string;
     part_index: number;
@@ -272,6 +373,47 @@ export const api = {
       capo?: number;
     }[];
   }) => post<{ musicxml: string }>("/score/tab/project", req),
+
+  // Lead-sheet view (A8): slash noteheads + chord symbols. Read-only projection.
+  projectLeadsheet: (req: {
+    musicxml: string;
+    part_index: number;
+    slashes?: boolean;
+    chords?: boolean;
+  }) =>
+    post<{ musicxml: string; chord_symbols: number }>("/score/tab/leadsheet", req),
+
+  // Fretboard chord/scale engine (A5 + A6). Read-only derivations.
+  chordVoicings: (req: {
+    chord: string;
+    tuning?: string[] | null;
+    capo?: number;
+    max_fret?: number;
+    max_voicings?: number;
+  }) => post<ChordVoicingsResult>("/guitar/chord/voicings", req),
+
+  scaleShape: (req: {
+    tonic: string;
+    scale: string;
+    tuning?: string[] | null;
+    capo?: number;
+    min_fret?: number;
+    span?: number;
+  }) => post<ScaleShapeResult>("/guitar/scale/shape", req),
+
+  // Pillar-2 respelling (A3): rewrite a part's tab positions from its current
+  // pitches + tuning/capo. Edits the canonical score (unlike the read-only view).
+  refretPart: (req: {
+    musicxml: string;
+    part_index: number;
+    tuning?: string[] | null;
+    capo?: number;
+    max_fret?: number;
+  }) =>
+    post<{ musicxml: string; reassigned: number; cleared: number }>(
+      "/score/tab/refret",
+      req,
+    ),
 
   resolveScoreNote: (req: {
     musicxml: string;

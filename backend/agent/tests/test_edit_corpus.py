@@ -43,7 +43,26 @@ def test_corpus_is_present() -> None:
         "cross_staff.musicxml",
         "tuplets.musicxml",
         "guitar_technical.musicxml",
+        "guitar_hopo_bend.musicxml",
     } <= names
+
+
+def _resolve(client: TestClient, xml: str, note: dict) -> dict:
+    return client.post(
+        "/score/edit/note/resolve",
+        json={
+            "musicxml": xml,
+            "measure_number": note["measure_number"],
+            "pitch": note["pitch"],
+            "beat_hint": note["beat_offset"],
+        },
+    ).json()
+
+
+def _guitar_notes(client: TestClient, xml: str) -> list[dict]:
+    listed = client.post("/score/edit/notes/list", json={"musicxml": xml})
+    assert listed.status_code == 200, listed.text
+    return _pitched(listed.json()["notes"])
 
 
 @pytest.mark.parametrize(
@@ -145,3 +164,200 @@ def test_corpus_guitar_technical_is_listable_and_editable(client: TestClient) ->
     # The edit path round-trips the score; technical notations on the other notes
     # survive (a Phase-4 precondition — the corpus would flag it if they didn't).
     assert "<technical>" in edited.json()["musicxml"]
+
+
+# ── M4.1 (A2) guitar technique edits — bend + hammer-on/pull-off (ADR-0020) ──
+
+
+def test_set_bend_round_trips(client: TestClient) -> None:
+    xml = _load("guitar_hopo_bend.musicxml")
+    notes = _guitar_notes(client, xml)
+    assert len(notes) == 4
+    target = _resolve(client, xml, notes[0])
+
+    # Add a whole-step bend.
+    added = client.post(
+        "/score/edit/technical/bend",
+        json={
+            "musicxml": xml,
+            "part_index": target["part_index"],
+            "measure_number": target["measure_number"],
+            "beat_offset": target["beat_offset"],
+            "voice": target["voice"],
+            "bend_alter": 2,
+        },
+    )
+    assert added.status_code == 200, added.text
+    assert added.json()["action"] == "added"
+    bent_xml = added.json()["musicxml"]
+    assert "<bend>" in bent_xml
+    assert "<bend-alter>2" in bent_xml
+
+    # The bent score still lists the same notes (round-trips cleanly).
+    assert len(_guitar_notes(client, bent_xml)) == 4
+
+    # Removing it (bend_alter=0) drops the <bend> and reports removed.
+    removed = client.post(
+        "/score/edit/technical/bend",
+        json={
+            "musicxml": bent_xml,
+            "part_index": target["part_index"],
+            "measure_number": target["measure_number"],
+            "beat_offset": target["beat_offset"],
+            "voice": target["voice"],
+            "bend_alter": 0,
+        },
+    )
+    assert removed.status_code == 200, removed.text
+    assert removed.json()["action"] == "removed"
+    assert "<bend>" not in removed.json()["musicxml"]
+
+
+@pytest.mark.parametrize("technique", ["hammer_on", "pull_off"])
+def test_connective_technique_round_trips(client: TestClient, technique: str) -> None:
+    xml = _load("guitar_hopo_bend.musicxml")
+    notes = _guitar_notes(client, xml)
+    tag = technique.replace("_", "-")
+    start = _resolve(client, xml, notes[0])
+
+    added = client.post(
+        "/score/edit/technical/connect",
+        json={
+            "musicxml": xml,
+            "part_index": start["part_index"],
+            "measure_number": start["measure_number"],
+            "beat_offset": start["beat_offset"],
+            "voice": start["voice"],
+            "technique": technique,
+            "action": "set",
+        },
+    )
+    assert added.status_code == 200, added.text
+    assert added.json()["action"] == "added"
+    connected_xml = added.json()["musicxml"]
+    # A start/stop pair was written across the first two notes.
+    assert f'<{tag} ' in connected_xml or f"<{tag}>" in connected_xml
+    assert connected_xml.count(tag) >= 2
+    assert len(_guitar_notes(client, connected_xml)) == 4
+
+    removed = client.post(
+        "/score/edit/technical/connect",
+        json={
+            "musicxml": connected_xml,
+            "part_index": start["part_index"],
+            "measure_number": start["measure_number"],
+            "beat_offset": start["beat_offset"],
+            "voice": start["voice"],
+            "technique": technique,
+            "action": "remove",
+        },
+    )
+    assert removed.status_code == 200, removed.text
+    assert removed.json()["action"] == "removed"
+    assert tag not in removed.json()["musicxml"]
+
+
+@pytest.mark.parametrize(
+    "marker",
+    [
+        "natural_harmonic",
+        "artificial_harmonic",
+        "vibrato",
+        "dead_note",
+        "ghost_note",
+        "strum_up",
+        "strum_down",
+    ],
+)
+def test_technical_marker_round_trips(client: TestClient, marker: str) -> None:
+    xml = _load("guitar_hopo_bend.musicxml")
+    notes = _guitar_notes(client, xml)
+    target = _resolve(client, xml, notes[0])
+    body = {
+        "musicxml": xml,
+        "part_index": target["part_index"],
+        "measure_number": target["measure_number"],
+        "beat_offset": target["beat_offset"],
+        "voice": target["voice"],
+        "marker": marker,
+    }
+    added = client.post("/score/edit/technical/toggle", json=body)
+    assert added.status_code == 200, added.text
+    assert added.json()["action"] == "added"
+    marked_xml = added.json()["musicxml"]
+    assert len(_guitar_notes(client, marked_xml)) == 4
+
+    removed = client.post("/score/edit/technical/toggle", json={**body, "musicxml": marked_xml})
+    assert removed.status_code == 200, removed.text
+    assert removed.json()["action"] == "removed"
+
+
+def test_slide_round_trips(client: TestClient) -> None:
+    xml = _load("guitar_hopo_bend.musicxml")
+    notes = _guitar_notes(client, xml)
+    start = _resolve(client, xml, notes[0])
+    added = client.post(
+        "/score/edit/technical/connect",
+        json={
+            "musicxml": xml,
+            "part_index": start["part_index"],
+            "measure_number": start["measure_number"],
+            "beat_offset": start["beat_offset"],
+            "voice": start["voice"],
+            "technique": "slide",
+            "action": "set",
+        },
+    )
+    assert added.status_code == 200, added.text
+    assert added.json()["action"] == "added"
+    assert "glissando" in added.json()["musicxml"]
+    assert len(_guitar_notes(client, added.json()["musicxml"])) == 4
+
+
+@pytest.mark.parametrize("technique", ["palm_mute", "let_ring"])
+def test_bracket_span_round_trips(client: TestClient, technique: str) -> None:
+    xml = _load("guitar_hopo_bend.musicxml")
+    notes = _guitar_notes(client, xml)
+    start = _resolve(client, xml, notes[0])
+    body = {
+        "musicxml": xml,
+        "part_index": start["part_index"],
+        "measure_number": start["measure_number"],
+        "beat_offset": start["beat_offset"],
+        "voice": start["voice"],
+        "technique": technique,
+    }
+    added = client.post("/score/edit/technical/span", json={**body, "action": "set"})
+    assert added.status_code == 200, added.text
+    assert added.json()["action"] == "added"
+    spanned_xml = added.json()["musicxml"]
+    assert "<bracket" in spanned_xml
+    assert len(_guitar_notes(client, spanned_xml)) == 4
+
+    removed = client.post(
+        "/score/edit/technical/span",
+        json={**body, "musicxml": spanned_xml, "action": "remove"},
+    )
+    assert removed.status_code == 200, removed.text
+    assert removed.json()["action"] == "removed"
+    assert "<bracket" not in removed.json()["musicxml"]
+
+
+def test_connective_technique_needs_following_note(client: TestClient) -> None:
+    xml = _load("guitar_hopo_bend.musicxml")
+    notes = _guitar_notes(client, xml)
+    last = _resolve(client, xml, notes[-1])  # last note in the measure
+    resp = client.post(
+        "/score/edit/technical/connect",
+        json={
+            "musicxml": xml,
+            "part_index": last["part_index"],
+            "measure_number": last["measure_number"],
+            "beat_offset": last["beat_offset"],
+            "voice": last["voice"],
+            "technique": "hammer_on",
+            "action": "set",
+        },
+    )
+    assert resp.status_code == 400
+    assert "following note" in resp.json()["detail"]

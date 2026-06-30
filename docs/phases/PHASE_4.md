@@ -61,40 +61,61 @@ has a test.
 - [x] The toggle never forks the source of truth: the canonical MusicXML in `ScoreEngine` is unchanged;
       a backend projection (`app/tools/tab_projection.py`) emits the view-specific MusicXML (ADR-0015 intact).
 
-**A2 — Guitar articulations (read/write) ← the core, the long pole**
+**A2 — Guitar articulations (read/write) ← the core, the long pole** *(M4.1 — core set landed; ADR-0020)*
 
-- [ ] The core set parses, renders (where OSMD supports it), round-trips through MusicXML, and is
-      both hand-editable and **agent-editable**: bend (with target/curve), slide (legato/shift/in/out),
-      hammer-on, pull-off, palm mute (span), let ring (span), vibrato, natural & artificial harmonics,
-      dead/ghost notes, strum/brush direction.
-- [ ] Point techniques extend the existing `/score/edit/articulation/toggle` vocabulary; **span**
-      techniques (palm mute, let ring, slides between notes) follow the `/tie/set` start/stop pattern.
-- [ ] Each technique is an `Operation` (with an inverse) and an agent tool; the edit-pipeline corpus
-      (`backend/agent/tests/fixtures/guitar_technical.musicxml` + new fixtures) covers every one.
+- [x] The core set parses, round-trips through MusicXML, and is both hand-editable and
+      **agent-editable**: **bend** (`FretBend`, target/pre-bend/release), **hammer-on**, **pull-off**,
+      **slide** (`Glissando`), **natural & artificial harmonics** (`StringHarmonic`), **vibrato**
+      (`TrillExtension` wavy line), **dead/ghost notes** (notehead `x` / parenthesis), **strum up/down**
+      (`ArpeggioMark`), **palm mute** & **let ring** (bracketed spans). All round-trip-tested.
+      *Render seam (ADR-0020 §5):* OSMD draws bends/`H`/`P`/gliss; per-glyph visual verification of the
+      newer markers (wavy-line, brackets, arpeggiate) is **not** re-confirmed this milestone — gaps fall
+      back to the standard-staff articulation, OSMD stays the single renderer.
+- [x] Point techniques use the `/score/edit/technical/*` family (`/toggle` map for markers, `/bend` for
+      the valued bend); **connective** (hammer-on/pull-off/slide) and **bracketed-span** (palm mute, let
+      ring) techniques follow the `/tie/set` start/stop discipline via `/technical/connect` and
+      `/technical/span`.
+- [x] Each technique is an `Operation` (inverse via frontend `OperationLog` replace-op / agent
+      `build_replace_op`) and an agent tool (`guitar_bend`, `guitar_connect`, `guitar_marker`,
+      `guitar_span`); the edit-pipeline corpus (`fixtures/guitar_technical.musicxml` +
+      `fixtures/guitar_hopo_bend.musicxml`) covers every technique via `resolve → edit → reload`
+      (`test_edit_corpus.py`). *Manual-UI follow-up:* bracketed spans are agent-driveable over any range;
+      the note menu spans to the bar end (no arbitrary range-select affordance yet).
 
-**A3 — Tunings, capo, multi-string** *(schema + fret math landed in M4.0; UI + respelling are M4.2)*
+**A3 — Tunings, capo, multi-string** *(M4.2 — UI + respelling landed)*
 
 - [x] Per-part guitar metadata in the schema (tuning array, capo, profile, view mode); `schema_version`
       2 → 3 with a lossless migrator (ADR-0018; `persistence.rs` tests).
-- [~] Fret math: pitch → (string, fret) honouring tuning + capo (`app/tools/fretboard.py`, tested).
-      **Transpose respelling (Pillar 2) not done** — M4.2.
-- [~] Tuning presets exist in the fret model (standard / drop D / DADGAD / bass; custom via array).
-      **No UI to set tuning/capo yet** — M4.2.
+- [x] Fret math: pitch → (string, fret) honouring tuning + capo (`app/tools/fretboard.py`, tested).
+      **Transpose/tuning respelling (Pillar 2):** `reassign_fret_positions` + `POST /score/tab/refret`
+      rewrite a part's `<string>/<fret>` to follow the tuning/capo after a transpose or tuning change;
+      unplayable notes lose their position rather than misstate it (`test_tab_projection.py`).
+- [x] Tuning presets (standard / drop D / DADGAD / bass) + **custom via array** + capo, all set in the
+      UI (`TuningControl` in `ScorePane`) and persisted; the tab view re-projects on change. Bass/7–8
+      string stay data-model-ready, UI-deferred per §4.7 Q1.
 
-**A4 — Fretboard viewer**
+**A4 — Fretboard viewer** *(M4.3 — landed)*
 
-- [ ] React+SVG fretboard synced to the playhead and the current selection; honours the part tuning/capo.
-- [ ] Shows the chord voicing (A5) and scale shape (A6) for the current selection/harmony.
+- [x] React+SVG fretboard (`notation/Fretboard.tsx`, panel `shell/FretboardPanel.tsx`) honouring the
+      part tuning/capo, synced to **the current selection** (emerald dot) **and the playhead** (rose dots
+      for the part's currently-sounding notes during playback, from the extracted note timings).
+- [x] Shows the chord voicing (A5) and scale shape (A6) for the current query; pick among ranked voicings.
 
-**A5 — Chord engine**
+**A5 — Chord engine** *(M4.3 — engine landed)*
 
-- [ ] Generate chord voicings/diagrams **algorithmically** (music21 + the fret model), not from a
-      static DB; reachable from the agent and the fretboard.
-- [ ] Auto chord-diagrams above the staff: **opt-in**, off by default, with a density control (see §4.7 Q2).
+- [x] Generate chord voicings **algorithmically** (`app/tools/guitar_engine.py`: music21 `harmony` for
+      pitch classes + the fret model + a window search), not from a static DB; reachable from the agent
+      (`guitar_chord_voicings`) and the fretboard panel. Ranked by root-in-bass / openness / position
+      (`test_guitar_engine.py` asserts the open-chord shapes).
+- [~] Auto chord-**diagrams** above the staff with a density control (§4.7 Q2): **not done** — the engine
+      generates voicings **on demand**, and A8's lead-sheet adds chord **symbols** (text) above the staff;
+      the auto-grid-diagram density toggle is the one remaining A5 follow-up.
 
-**A6 — Scale engine**
+**A6 — Scale engine** *(M4.3 — landed)*
 
-- [ ] Scale viewer on the fretboard; shares the fret model with A5 and feeds the Theory Tutor (Pillar 8).
+- [x] Scale viewer on the fretboard (`guitar_engine.scale_shape` + the panel's Scale mode), sharing A5's
+      fret model; reachable from the agent (`guitar_scale_shape`). Theory-Tutor wiring (Pillar 8) is light
+      — the same engine is one call away when the Tutor wants a shape.
 
 **A7 — Guitar Pro import** *(M4.0 — landed)*
 
@@ -107,16 +128,21 @@ has a test.
 - [ ] *(Optional)* alphaTab's player preview — not done (deferred; optional).
 - [x] No user-facing `.gp` **export** (§4.7 Q3) — MusicXML is the interchange truth.
 
-**A8 — Rhythmic/slash notation & chord charts**
+**A8 — Rhythmic/slash notation & chord charts** *(M4.4 — landed)*
 
-- [ ] Lead-sheet mode: slash/rhythmic notation + chord symbols above the staff, round-tripping through
-      MusicXML.
+- [x] Lead-sheet mode: a per-part **"lead"** view (`app/tools/leadsheet_projection.py`,
+      `POST /score/tab/leadsheet`, `score_leadsheet` agent tool) projects rhythmic **slash** noteheads +
+      **chord symbols** (`<harmony>`) derived from the whole score's harmony, round-tripping through
+      MusicXML (`test_tab_projection.py`). Wired as a 4th `ViewModeToggle` mode; opt-in per part (§4.7 Q2),
+      OSMD stays the single renderer (ADR-0015).
 
 **General**
 
-- [~] ADRs written: **0018** (schema v3) + **0019** (alphaTab import-only) done; **0020** (technical
-      model) is M4.1.
-- [ ] `git tag v0.4.0-tablature` cut when all boxes are checked.
+- [x] ADRs written: **0018** (schema v3) + **0019** (alphaTab import-only) + **0020** (technical model).
+- [~] `git tag v0.4.0-tablature`: **not yet cut.** All workstreams A1–A8 have landed and round-trip with
+      tests (rust 11 · backend 192 · frontend 90 green). The remaining open items before the tag are the
+      **A5 auto-chord-diagram density toggle** (§4.7 Q2) and the optional A7 alphaTab player preview — plus
+      a maintainer demo pass. Cut the tag once those are closed or explicitly waived.
 
 ---
 
@@ -218,10 +244,10 @@ priority; lands last.
 | Milestone | Workstreams | Status | Tag |
 |---|---|---|---|
 | **M4.0 — Tab view & GP import** | A1 (per-part toggle + projection) + A7 (alphaTab import, code-split) + minimal A3 (fret math + schema v3) | ✅ **landed & verified** (rust 11 · backend 34 tab + suite · frontend 84 green; tab/both **visually confirmed** in OSMD). Deferred to later milestones: tuning/capo UI + transpose respelling (M4.2), alphaTab player preview (optional). | — |
-| **M4.1 — Guitar articulations** | A2 (core set: bend, slide, HOPO, palm mute, let ring, vibrato, harmonics, dead/ghost, strum) | ⏳ next. The core; de-risked by the M3.5.3 corpus. ADR-0020. | — |
-| **M4.2 — Tunings, capo, fret math** | A3 full (tuning/capo **UI** + custom + transpose respelling) | ⏳ | — |
-| **M4.3 — Fretboard + chord/scale engines** | A4 + A5 + A6 | ⏳ | — |
-| **M4.4 — Lead-sheet mode** | A8 | ⏳ | `v0.4.0-tablature` |
+| **M4.1 — Guitar articulations** | A2 (core set: bend, slide, HOPO, palm mute, let ring, vibrato, harmonics, dead/ghost, strum) | ✅ **core set landed** (ADR-0020). All 10 techniques round-trip-tested + hand- and agent-editable via `/score/edit/technical/*` + `guitar_{bend,connect,marker,span}`. Follow-ups: OSMD per-glyph visual check + arbitrary-range span UI. | — |
+| **M4.2 — Tunings, capo, fret math** | A3 full (tuning/capo **UI** + custom + transpose respelling) | ✅ landed (`TuningControl` + `/score/tab/refret`). | — |
+| **M4.3 — Fretboard + chord/scale engines** | A4 + A5 + A6 | ✅ landed (`Fretboard`/`FretboardPanel` + `guitar_engine` + `/guitar/*`). A5 auto-diagram density toggle is the one follow-up. | — |
+| **M4.4 — Lead-sheet mode** | A8 | ✅ landed (`leadsheet_projection` + "lead" view mode). | `v0.4.0-tablature` |
 
 > M4.0 and M4.1 are independent and could run in parallel; M4.0 ships first because it is cheap and
 > immediately demoable. A2 (M4.1) is the long pole — budget accordingly.

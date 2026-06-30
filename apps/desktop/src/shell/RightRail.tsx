@@ -2,7 +2,7 @@
  * Right rail — tabbed panel column (Agent, Tutor, Harmony, Panel, Practice).
  */
 
-import { BarChart3, GraduationCap, Piano, Sparkles, Users } from "lucide-react";
+import { BarChart3, GraduationCap, Grid3x3, Piano, Sparkles, Users } from "lucide-react";
 import { useState } from "react";
 
 import { HarmonyPanel } from "../agent/HarmonyPanel";
@@ -10,8 +10,9 @@ import { MultiAgentPanel } from "../agent/MultiAgentPanel";
 import { PracticePanel } from "../agent/PracticePanel";
 import { TheoryTutor } from "../agent/TheoryTutor";
 import { AgentPanel } from "./AgentPanel";
+import { FretboardPanel } from "./FretboardPanel";
 
-type Tab = "agent" | "tutor" | "harmony" | "panel" | "practice";
+type Tab = "agent" | "tutor" | "harmony" | "fretboard" | "panel" | "practice";
 
 export function RightRail(): React.ReactElement {
   const [tab, setTab] = useState<Tab>("agent");
@@ -38,6 +39,12 @@ export function RightRail(): React.ReactElement {
           label="Harmony"
         />
         <TabButton
+          active={tab === "fretboard"}
+          onClick={() => setTab("fretboard")}
+          icon={<Grid3x3 size={11} className="text-neon-cyan" />}
+          label="Fretboard"
+        />
+        <TabButton
           active={tab === "panel"}
           onClick={() => setTab("panel")}
           icon={<Users size={11} className="text-neon-cyan" />}
@@ -54,6 +61,7 @@ export function RightRail(): React.ReactElement {
         {tab === "agent" && <AgentPanel />}
         {tab === "tutor" && <TheoryTutor />}
         {tab === "harmony" && <HarmonyPanel />}
+        {tab === "fretboard" && <FretboardPanel />}
         {tab === "panel" && <MultiAgentPanel />}
         {tab === "practice" && <PracticePanel />}
       </div>

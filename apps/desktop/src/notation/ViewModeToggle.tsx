@@ -12,6 +12,7 @@ const MODES: { value: ViewMode; label: string }[] = [
   { value: "staff", label: "Staff" },
   { value: "tab", label: "Tab" },
   { value: "both", label: "Both" },
+  { value: "lead", label: "Lead" },
 ];
 
 interface ViewModeToggleProps {

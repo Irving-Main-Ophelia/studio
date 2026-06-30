@@ -21,12 +21,35 @@ from app.tools.fretboard import (
     assign_fret,
     pitch_name_to_midi,
 )
+from app.tools.leadsheet_projection import project_leadsheet
 from app.tools.tab_projection import (
     PartView,
     _measure_duration,
     project_view,
     project_views,
+    reassign_fret_positions,
 )
+
+# A one-part score whose two measures spell a C and a G triad (block chords), so
+# chordify identifies real chord symbols for the lead-sheet projection.
+LEADSHEET_XML = """<?xml version='1.0' encoding='utf-8'?>
+<score-partwise version='4.0'>
+  <part-list><score-part id='P1'><part-name>Gtr</part-name></score-part></part-list>
+  <part id='P1'>
+    <measure number='1'>
+      <attributes><divisions>1</divisions><time><beats>4</beats><beat-type>4</beat-type></time>
+        <clef><sign>G</sign><line>2</line></clef></attributes>
+      <note><pitch><step>C</step><octave>4</octave></pitch><duration>4</duration><type>whole</type></note>
+      <note><chord/><pitch><step>E</step><octave>4</octave></pitch><duration>4</duration><type>whole</type></note>
+      <note><chord/><pitch><step>G</step><octave>4</octave></pitch><duration>4</duration><type>whole</type></note>
+    </measure>
+    <measure number='2'>
+      <note><pitch><step>G</step><octave>3</octave></pitch><duration>4</duration><type>whole</type></note>
+      <note><chord/><pitch><step>B</step><octave>3</octave></pitch><duration>4</duration><type>whole</type></note>
+      <note><chord/><pitch><step>D</step><octave>4</octave></pitch><duration>4</duration><type>whole</type></note>
+    </measure>
+  </part>
+</score-partwise>"""
 
 # A minimal two-part score (guitar + a second part) for per-part view tests.
 TWO_PART_XML = """<?xml version='1.0' encoding='utf-8'?>
@@ -139,6 +162,96 @@ def test_tab_view_preserves_authored_positions() -> None:
     root = ET.fromstring(out)
     frets = [n.find("notations/technical").findtext("fret") for n in root.findall("part/measure/note")]
     assert frets == ["0", "3", "5", "12"]
+
+
+# --------------------------------------------------------------------------- #
+# refret — Pillar-2 respelling: positions follow the tuning/capo (A3)
+# --------------------------------------------------------------------------- #
+
+
+def test_refret_reassigns_positions_under_capo() -> None:
+    # The fixture authors string 1 / frets 0,3,5,12 (E4,G4,A4,E5). With a capo on
+    # fret 2 the high E4 no longer fits string 1 (open = F#4), so it moves down a
+    # string — proving positions follow the tuning/capo rather than the old marks.
+    result = reassign_fret_positions(
+        _load("guitar_technical.musicxml"), part_index=0, capo=2
+    )
+    assert result["reassigned"] == 4
+    assert result["cleared"] == 0
+    root = ET.fromstring(result["musicxml"])
+    first = root.find("part/measure/note/notations/technical")
+    assert first.findtext("string") == "2"  # bumped off string 1 by the capo
+
+
+def test_refret_clears_unplayable_in_bass_tuning() -> None:
+    # On a 4-string bass the top notes (A4, E5) are unreachable ⇒ they lose their
+    # position instead of misstating the pitch.
+    result = reassign_fret_positions(
+        _load("guitar_technical.musicxml"),
+        part_index=0,
+        tuning=["G2", "D2", "A1", "E1"],
+        max_fret=24,
+    )
+    assert result["cleared"] == 2
+    assert result["reassigned"] == 2
+
+
+def test_refret_route_round_trips_through_music21() -> None:
+    client = TestClient(create_app())
+    resp = client.post(
+        "/score/tab/refret",
+        json={"musicxml": _load("guitar_technical.musicxml"), "part_index": 0, "capo": 0},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["reassigned"] == 4
+    # The refret output still parses cleanly with music21 (no malformed XML).
+    converter.parseData(body["musicxml"], format="musicxml")
+
+
+def test_refret_route_rejects_bad_part_index() -> None:
+    client = TestClient(create_app())
+    resp = client.post(
+        "/score/tab/refret",
+        json={"musicxml": _load("guitar_technical.musicxml"), "part_index": 5},
+    )
+    assert resp.status_code == 400
+
+
+# --------------------------------------------------------------------------- #
+# lead-sheet projection — slash noteheads + chord symbols (A8)
+# --------------------------------------------------------------------------- #
+
+
+def test_leadsheet_adds_chord_symbols_and_slashes() -> None:
+    result = project_leadsheet(LEADSHEET_XML, part_index=0)
+    assert result["chord_symbols"] == 2  # one per measure (C, G)
+    root = ET.fromstring(result["musicxml"])
+    steps = [h.findtext("root/root-step") for h in root.iter("harmony")]
+    assert steps == ["C", "G"]
+    assert any(nh.text == "slash" for nh in root.iter("notehead"))
+
+
+def test_leadsheet_slashes_only_when_requested() -> None:
+    result = project_leadsheet(LEADSHEET_XML, part_index=0, slashes=False, chords=True)
+    root = ET.fromstring(result["musicxml"])
+    assert not any(nh.text == "slash" for nh in root.iter("notehead"))
+    assert len(list(root.iter("harmony"))) == 2
+
+
+def test_leadsheet_route_round_trips() -> None:
+    client = TestClient(create_app())
+    resp = client.post("/score/tab/leadsheet", json={"musicxml": LEADSHEET_XML, "part_index": 0})
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["chord_symbols"] == 2
+    converter.parseData(body["musicxml"], format="musicxml")
+
+
+def test_leadsheet_route_rejects_bad_part() -> None:
+    client = TestClient(create_app())
+    resp = client.post("/score/tab/leadsheet", json={"musicxml": LEADSHEET_XML, "part_index": 9})
+    assert resp.status_code == 400
 
 
 def test_both_view_makes_two_staves_with_balanced_timing() -> None:

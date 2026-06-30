@@ -33,6 +33,10 @@ OperationKind = Literal[
     "score_vary_motif",
     "guitar_add_techniques",
     "guitar_generate_variation",
+    "guitar_bend",
+    "guitar_connect",
+    "guitar_marker",
+    "guitar_span",
 ]
 
 

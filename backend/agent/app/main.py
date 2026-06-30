@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app import __version__
 from app.config import get_settings
-from app.routes import audio, chat, export, generate, health, multi_agent, orchestration, practice, score, score_edit, style, tab, theory, transpose
+from app.routes import audio, chat, export, generate, guitar, health, multi_agent, orchestration, practice, score, score_edit, style, tab, theory, transpose
 
 settings = get_settings()
 logging.basicConfig(level=settings.log_level.upper())
@@ -105,6 +105,7 @@ def create_app() -> FastAPI:
     app.include_router(score.router)
     app.include_router(score_edit.router)
     app.include_router(tab.router)
+    app.include_router(guitar.router)
     app.include_router(theory.router)
     app.include_router(export.router)
     app.include_router(generate.router)

@@ -53,6 +53,13 @@ from stockhausen_theory.validators.guitar_voicing import validate_guitar_voicing
 
 from app.config import get_settings
 from app.generator import generate_score as _generate_score
+from app.tools.guitar_engine import chord_voicings as _chord_voicings
+from app.tools.guitar_engine import scale_shape as _scale_shape
+from app.tools.leadsheet_projection import project_leadsheet as _project_leadsheet
+from app.tools.score_edit import set_bend as _set_bend
+from app.tools.score_edit import set_bracket_span as _set_bracket_span
+from app.tools.score_edit import set_connective_technique as _set_connective_technique
+from app.tools.score_edit import toggle_technical_marker as _toggle_technical_marker
 from app.guitar_styles import get_style as _get_guitar_style, list_styles as _list_guitar_styles
 from app.score_diff import (
     ScoreDiff,
@@ -1508,6 +1515,166 @@ def build_tool_descriptors() -> list[ToolParam]:
             input_schema={"type": "object", "properties": {}, "required": []},
         ),
         ToolParam(
+            name="guitar_bend",
+            description=(
+                "Set or clear a string bend on one note (round-trips through MusicXML, "
+                "reversible). 'bend_alter' is the target in semitones (positive = bend "
+                "up, negative = bend down); 0 removes any existing bend. 'beat_offset' is "
+                "the 0-based quarter-note offset of the note within its measure (downbeat "
+                "= 0.0). Optional 'pre_bend' (string already bent at onset) and 'release' "
+                "(quarter-length at which the bend is released)."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "part_index": {"type": "integer", "minimum": 0},
+                    "measure_number": {"type": "integer", "minimum": 1},
+                    "beat_offset": {"type": "number", "minimum": 0},
+                    "bend_alter": {"type": "integer"},
+                    "pre_bend": {"type": "boolean"},
+                    "release": {"type": "number", "minimum": 0},
+                    "voice": {"type": "integer", "minimum": 1},
+                },
+                "required": ["measure_number", "beat_offset", "bend_alter"],
+            },
+        ),
+        ToolParam(
+            name="guitar_connect",
+            description=(
+                "Set or clear a connective guitar technique between a note and the next "
+                "one. 'technique' is 'hammer_on', 'pull_off', or 'slide'. The cursor "
+                "addresses the START note ('beat_offset' = its 0-based quarter offset "
+                "within the measure); the technique connects to the immediately following "
+                "note. 'action' is 'set' (default) or 'remove'."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "part_index": {"type": "integer", "minimum": 0},
+                    "measure_number": {"type": "integer", "minimum": 1},
+                    "beat_offset": {"type": "number", "minimum": 0},
+                    "technique": {"type": "string", "enum": ["hammer_on", "pull_off", "slide"]},
+                    "action": {"type": "string", "enum": ["set", "remove"]},
+                    "voice": {"type": "integer", "minimum": 1},
+                },
+                "required": ["measure_number", "beat_offset", "technique"],
+            },
+        ),
+        ToolParam(
+            name="guitar_chord_voicings",
+            description=(
+                "Generate playable guitar voicings of a chord symbol (e.g. 'Cmaj7', "
+                "'Am', 'G7', 'Bb') algorithmically, honouring tuning/capo. Returns "
+                "ranked voicings (best first) with per-string fret positions, "
+                "root-in-bass flag, and a difficulty label. Read-only."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "chord": {"type": "string"},
+                    "tuning": {"type": "array", "items": {"type": "string"}},
+                    "capo": {"type": "integer", "minimum": 0, "maximum": 24},
+                    "max_fret": {"type": "integer", "minimum": 3, "maximum": 24},
+                    "max_voicings": {"type": "integer", "minimum": 1, "maximum": 20},
+                },
+                "required": ["chord"],
+            },
+        ),
+        ToolParam(
+            name="guitar_scale_shape",
+            description=(
+                "Return the fretboard positions of a scale within a fret window (a "
+                "'box') for the given tonic + scale name (major, natural_minor, "
+                "harmonic_minor, melodic_minor, dorian, phrygian, lydian, mixolydian, "
+                "locrian, major_pentatonic, minor_pentatonic, blues). Read-only."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "tonic": {"type": "string"},
+                    "scale": {"type": "string"},
+                    "tuning": {"type": "array", "items": {"type": "string"}},
+                    "capo": {"type": "integer", "minimum": 0, "maximum": 24},
+                    "min_fret": {"type": "integer", "minimum": 0, "maximum": 24},
+                    "span": {"type": "integer", "minimum": 1, "maximum": 12},
+                },
+                "required": ["tonic", "scale"],
+            },
+        ),
+        ToolParam(
+            name="score_leadsheet",
+            description=(
+                "Project a part to a lead-sheet view: rhythmic slash noteheads + chord "
+                "symbols derived from the whole score's harmony. Read-only (the canonical "
+                "score is unchanged). Returns the view MusicXML and chord-symbol count."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "part_index": {"type": "integer", "minimum": 0},
+                    "slashes": {"type": "boolean"},
+                    "chords": {"type": "boolean"},
+                },
+                "required": [],
+            },
+        ),
+        ToolParam(
+            name="guitar_marker",
+            description=(
+                "Toggle a point guitar marker on one note: 'natural_harmonic', "
+                "'artificial_harmonic', 'vibrato', 'dead_note', 'ghost_note', 'strum_up', "
+                "or 'strum_down'. Adds it if absent, removes it if present (harmonic and "
+                "strum variants are mutually exclusive). 'beat_offset' is the note's "
+                "0-based quarter offset within the measure."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "part_index": {"type": "integer", "minimum": 0},
+                    "measure_number": {"type": "integer", "minimum": 1},
+                    "beat_offset": {"type": "number", "minimum": 0},
+                    "marker": {
+                        "type": "string",
+                        "enum": [
+                            "natural_harmonic",
+                            "artificial_harmonic",
+                            "vibrato",
+                            "dead_note",
+                            "ghost_note",
+                            "strum_up",
+                            "strum_down",
+                        ],
+                    },
+                    "voice": {"type": "integer", "minimum": 1},
+                },
+                "required": ["measure_number", "beat_offset", "marker"],
+            },
+        ),
+        ToolParam(
+            name="guitar_span",
+            description=(
+                "Set or clear a bracketed-span technique — 'palm_mute' or 'let_ring' — "
+                "drawn as a bracket across a range. The cursor is the START note; the "
+                "bracket runs to the explicit end cursor "
+                "('end_measure_number'/'end_beat_offset') or, if omitted, to the end of "
+                "the start note's measure. 'action' is 'set' (default) or 'remove'."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "part_index": {"type": "integer", "minimum": 0},
+                    "measure_number": {"type": "integer", "minimum": 1},
+                    "beat_offset": {"type": "number", "minimum": 0},
+                    "technique": {"type": "string", "enum": ["palm_mute", "let_ring"]},
+                    "action": {"type": "string", "enum": ["set", "remove"]},
+                    "end_measure_number": {"type": "integer", "minimum": 1},
+                    "end_beat_offset": {"type": "number", "minimum": 0},
+                    "voice": {"type": "integer", "minimum": 1},
+                },
+                "required": ["measure_number", "beat_offset", "technique"],
+            },
+        ),
+        ToolParam(
             name="score_vary_motif",
             description=(
                 "Apply a classical motivic transformation to a region of the score. "
@@ -1716,6 +1883,95 @@ def dispatch_tool(  # noqa: PLR0911 — flat dispatch table is clearer than a re
         return diff.model_dump(mode="json"), diff
     if name == "guitar_list_styles":
         return guitar_list_styles(), None
+    if name == "guitar_bend":
+        diff = guitar_bend(
+            score_musicxml,
+            part_index=int(arguments.get("part_index", 0)),
+            measure_number=int(arguments["measure_number"]),
+            beat_offset=float(arguments["beat_offset"]),
+            bend_alter=int(arguments["bend_alter"]),
+            pre_bend=bool(arguments.get("pre_bend", False)),
+            release=(
+                float(arguments["release"]) if arguments.get("release") is not None else None
+            ),
+            voice=(int(arguments["voice"]) if arguments.get("voice") is not None else None),
+        )
+        return diff.model_dump(mode="json"), diff
+    if name == "guitar_connect":
+        diff = guitar_connect(
+            score_musicxml,
+            part_index=int(arguments.get("part_index", 0)),
+            measure_number=int(arguments["measure_number"]),
+            beat_offset=float(arguments["beat_offset"]),
+            technique=str(arguments["technique"]),
+            action=str(arguments.get("action", "set")),
+            voice=(int(arguments["voice"]) if arguments.get("voice") is not None else None),
+        )
+        return diff.model_dump(mode="json"), diff
+    if name == "guitar_chord_voicings":
+        return (
+            guitar_chord_voicings(
+                str(arguments["chord"]),
+                tuning=arguments.get("tuning"),
+                capo=int(arguments.get("capo", 0)),
+                max_fret=int(arguments.get("max_fret", 15)),
+                max_voicings=int(arguments.get("max_voicings", 6)),
+            ),
+            None,
+        )
+    if name == "guitar_scale_shape":
+        return (
+            guitar_scale_shape(
+                str(arguments["tonic"]),
+                str(arguments["scale"]),
+                tuning=arguments.get("tuning"),
+                capo=int(arguments.get("capo", 0)),
+                min_fret=int(arguments.get("min_fret", 0)),
+                span=int(arguments.get("span", 4)),
+            ),
+            None,
+        )
+    if name == "score_leadsheet":
+        return (
+            score_leadsheet(
+                score_musicxml,
+                part_index=int(arguments.get("part_index", 0)),
+                slashes=bool(arguments.get("slashes", True)),
+                chords=bool(arguments.get("chords", True)),
+            ),
+            None,
+        )
+    if name == "guitar_marker":
+        diff = guitar_marker(
+            score_musicxml,
+            part_index=int(arguments.get("part_index", 0)),
+            measure_number=int(arguments["measure_number"]),
+            beat_offset=float(arguments["beat_offset"]),
+            marker=str(arguments["marker"]),
+            voice=(int(arguments["voice"]) if arguments.get("voice") is not None else None),
+        )
+        return diff.model_dump(mode="json"), diff
+    if name == "guitar_span":
+        diff = guitar_span(
+            score_musicxml,
+            part_index=int(arguments.get("part_index", 0)),
+            measure_number=int(arguments["measure_number"]),
+            beat_offset=float(arguments["beat_offset"]),
+            technique=str(arguments["technique"]),
+            action=str(arguments.get("action", "set")),
+            end_measure_number=(
+                int(arguments["end_measure_number"])
+                if arguments.get("end_measure_number") is not None
+                else None
+            ),
+            end_beat_offset=(
+                float(arguments["end_beat_offset"])
+                if arguments.get("end_beat_offset") is not None
+                else None
+            ),
+            voice=(int(arguments["voice"]) if arguments.get("voice") is not None else None),
+        )
+        return diff.model_dump(mode="json"), diff
     if name == "score_vary_motif":
         diff = score_vary_motif(
             score_musicxml,
@@ -1880,6 +2136,278 @@ def guitar_list_styles() -> dict[str, Any]:
     return {"styles": _list_guitar_styles()}
 
 
+def guitar_chord_voicings(
+    chord: str,
+    *,
+    tuning: list[str] | None = None,
+    capo: int = 0,
+    max_fret: int = 15,
+    max_voicings: int = 6,
+) -> dict[str, Any]:
+    """Generate playable fretboard voicings of a chord symbol, best first (A5)."""
+    return _chord_voicings(
+        chord, tuning=tuning, capo=capo, max_fret=max_fret, max_voicings=max_voicings
+    )
+
+
+def guitar_scale_shape(
+    tonic: str,
+    scale: str,
+    *,
+    tuning: list[str] | None = None,
+    capo: int = 0,
+    min_fret: int = 0,
+    span: int = 4,
+) -> dict[str, Any]:
+    """Return the fretboard positions of a scale within a window — a 'box' (A6)."""
+    return _scale_shape(
+        tonic, scale, tuning=tuning, capo=capo, min_fret=min_fret, span=span
+    )
+
+
+def score_leadsheet(
+    musicxml: str,
+    *,
+    part_index: int = 0,
+    slashes: bool = True,
+    chords: bool = True,
+) -> dict[str, Any]:
+    """Project a part to a lead-sheet view: slash noteheads + chord symbols (A8).
+
+    Read-only view derivation (the canonical score is unchanged); returns the view
+    MusicXML and the count of chord symbols placed.
+    """
+    return _project_leadsheet(
+        musicxml, part_index=part_index, slashes=slashes, chords=chords
+    )
+
+
+def guitar_bend(
+    musicxml: str,
+    *,
+    part_index: int,
+    measure_number: int,
+    beat_offset: float,
+    bend_alter: int,
+    pre_bend: bool = False,
+    release: float | None = None,
+    voice: int | None = None,
+) -> ScoreDiff:
+    """Set or clear a string bend on a single note (ADR-0020).
+
+    ``bend_alter`` is the bend target in semitones (+ up, − down); ``0`` removes
+    any existing bend. Routes through the music21 edit pipeline so the change
+    round-trips through MusicXML and is reversible (the op's inverse is the
+    previous score).
+    """
+    result = _set_bend(
+        musicxml,
+        part_index=part_index,
+        measure_number=measure_number,
+        beat_offset=beat_offset,
+        bend_alter=bend_alter,
+        pre_bend=pre_bend,
+        release=release,
+        voice=voice,
+    )
+    next_xml = result["musicxml"]
+    if bend_alter:
+        description = (
+            f"{'Pre-bend' if pre_bend else 'Bend'} {bend_alter:+d} st "
+            f"at m.{measure_number} beat {beat_offset}"
+        )
+    else:
+        description = f"Remove bend at m.{measure_number} beat {beat_offset}"
+    op = build_replace_op(
+        kind="guitar_bend",
+        description=description,
+        previous_musicxml=musicxml,
+        next_musicxml=next_xml,
+        metadata={
+            "part_index": part_index,
+            "measure_number": measure_number,
+            "beat_offset": beat_offset,
+            "bend_alter": bend_alter,
+            "pre_bend": pre_bend,
+            "release": release,
+            "voice": voice,
+            "action": result["action"],
+        },
+    )
+    return ScoreDiff.build(
+        tool="guitar.bend",
+        base_musicxml=musicxml,
+        preview_musicxml=next_xml,
+        description=description,
+        operations=[op],
+        warnings=[],
+    )
+
+
+def guitar_connect(
+    musicxml: str,
+    *,
+    part_index: int,
+    measure_number: int,
+    beat_offset: float,
+    technique: str,
+    action: str = "set",
+    voice: int | None = None,
+) -> ScoreDiff:
+    """Set or clear a connective guitar technique (hammer-on, pull-off).
+
+    The cursor addresses the *start* note; ``set`` draws the technique to the
+    immediately following note, ``remove`` clears it. Routes through the music21
+    edit pipeline (ADR-0020); the op is reversible.
+    """
+    result = _set_connective_technique(
+        musicxml,
+        part_index=part_index,
+        measure_number=measure_number,
+        beat_offset=beat_offset,
+        technique=technique,
+        action=action,
+        voice=voice,
+    )
+    next_xml = result["musicxml"]
+    label = technique.replace("_", "-")
+    verb = "Remove" if action == "remove" else "Add"
+    description = f"{verb} {label} at m.{measure_number} beat {beat_offset}"
+    op = build_replace_op(
+        kind="guitar_connect",
+        description=description,
+        previous_musicxml=musicxml,
+        next_musicxml=next_xml,
+        metadata={
+            "part_index": part_index,
+            "measure_number": measure_number,
+            "beat_offset": beat_offset,
+            "technique": technique,
+            "action": action,
+            "voice": voice,
+            "result_action": result["action"],
+        },
+    )
+    return ScoreDiff.build(
+        tool="guitar.connect",
+        base_musicxml=musicxml,
+        preview_musicxml=next_xml,
+        description=description,
+        operations=[op],
+        warnings=[],
+    )
+
+
+def guitar_marker(
+    musicxml: str,
+    *,
+    part_index: int,
+    measure_number: int,
+    beat_offset: float,
+    marker: str,
+    voice: int | None = None,
+) -> ScoreDiff:
+    """Toggle a point guitar marker on one note (ADR-0020).
+
+    ``marker``: natural_harmonic, artificial_harmonic, vibrato, dead_note,
+    ghost_note, strum_up, strum_down. Routes through the music21 edit pipeline;
+    the op is reversible.
+    """
+    result = _toggle_technical_marker(
+        musicxml,
+        part_index=part_index,
+        measure_number=measure_number,
+        beat_offset=beat_offset,
+        marker=marker,
+        voice=voice,
+    )
+    next_xml = result["musicxml"]
+    label = marker.replace("_", " ")
+    verb = "Remove" if result["action"] == "removed" else "Add"
+    description = f"{verb} {label} at m.{measure_number} beat {beat_offset}"
+    op = build_replace_op(
+        kind="guitar_marker",
+        description=description,
+        previous_musicxml=musicxml,
+        next_musicxml=next_xml,
+        metadata={
+            "part_index": part_index,
+            "measure_number": measure_number,
+            "beat_offset": beat_offset,
+            "marker": marker,
+            "voice": voice,
+            "action": result["action"],
+        },
+    )
+    return ScoreDiff.build(
+        tool="guitar.marker",
+        base_musicxml=musicxml,
+        preview_musicxml=next_xml,
+        description=description,
+        operations=[op],
+        warnings=[],
+    )
+
+
+def guitar_span(
+    musicxml: str,
+    *,
+    part_index: int,
+    measure_number: int,
+    beat_offset: float,
+    technique: str,
+    action: str = "set",
+    end_measure_number: int | None = None,
+    end_beat_offset: float | None = None,
+    voice: int | None = None,
+) -> ScoreDiff:
+    """Set or clear a bracketed-span technique (palm_mute, let_ring) (ADR-0020).
+
+    The cursor addresses the start note; the bracket runs to the explicit end
+    cursor, or defaults to the end of the start note's measure. Reversible.
+    """
+    result = _set_bracket_span(
+        musicxml,
+        part_index=part_index,
+        measure_number=measure_number,
+        beat_offset=beat_offset,
+        technique=technique,
+        action=action,
+        end_measure_number=end_measure_number,
+        end_beat_offset=end_beat_offset,
+        voice=voice,
+    )
+    next_xml = result["musicxml"]
+    label = technique.replace("_", " ")
+    verb = "Remove" if action == "remove" else "Add"
+    description = f"{verb} {label} at m.{measure_number} beat {beat_offset}"
+    op = build_replace_op(
+        kind="guitar_span",
+        description=description,
+        previous_musicxml=musicxml,
+        next_musicxml=next_xml,
+        metadata={
+            "part_index": part_index,
+            "measure_number": measure_number,
+            "beat_offset": beat_offset,
+            "technique": technique,
+            "action": action,
+            "end_measure_number": end_measure_number,
+            "end_beat_offset": end_beat_offset,
+            "voice": voice,
+            "result_action": result["action"],
+        },
+    )
+    return ScoreDiff.build(
+        tool="guitar.span",
+        base_musicxml=musicxml,
+        preview_musicxml=next_xml,
+        description=description,
+        operations=[op],
+        warnings=[],
+    )
+
+
 def score_vary_motif(
     musicxml: str,
     *,
@@ -2027,6 +2555,13 @@ __all__ = [
     "project_snapshot",
     # guitar
     "guitar_add_techniques",
+    "guitar_bend",
+    "guitar_chord_voicings",
+    "guitar_connect",
+    "guitar_marker",
+    "guitar_scale_shape",
+    "guitar_span",
+    "score_leadsheet",
     "guitar_generate_variation",
     "guitar_list_styles",
     "guitar_validate_voicing",

@@ -5,7 +5,9 @@ import { NoteEditToolbar } from "../editor/NoteEditToolbar";
 import { api } from "../lib/api";
 import { useScoreEngine } from "../lib/ScoreEngine";
 import { ScoreView } from "../notation/ScoreView";
+import { TuningControl } from "../notation/TuningControl";
 import { ViewModeToggle } from "../notation/ViewModeToggle";
+import { STANDARD_GUITAR_TUNING } from "../project/types";
 import type { InstrumentationEntry, ViewMode } from "../project/types";
 
 interface ScorePaneProps {
@@ -54,12 +56,12 @@ export function ScorePane({ onNewProject, onImportAudio, onOpenMusicXml }: Score
   const [projecting, setProjecting] = useState(false);
   const [projectError, setProjectError] = useState<string | null>(null);
 
-  // Parts requesting a non-staff view ⇒ the projection request body.
-  const activeSpecs = useMemo(
+  // Parts requesting a tab/both view (handled by the tab projection).
+  const tabSpecs = useMemo(
     () =>
       parts.flatMap((p) => {
         const vm = viewModes[p.index] ?? "staff";
-        if (vm === "staff") return [];
+        if (vm !== "tab" && vm !== "both") return [];
         return [
           {
             part_index: p.index,
@@ -71,21 +73,36 @@ export function ScorePane({ onNewProject, onImportAudio, onOpenMusicXml }: Score
       }),
     [parts, viewModes],
   );
-  const specsKey = JSON.stringify(activeSpecs);
+  // Parts requesting a lead-sheet view (handled by the leadsheet projection).
+  const leadParts = useMemo(
+    () => parts.filter((p) => (viewModes[p.index] ?? "staff") === "lead").map((p) => p.index),
+    [parts, viewModes],
+  );
+  const anyProjection = tabSpecs.length > 0 || leadParts.length > 0;
+  const specsKey = JSON.stringify({ tabSpecs, leadParts });
 
   useEffect(() => {
-    if (!canonical || activeSpecs.length === 0) {
+    if (!canonical || !anyProjection) {
       setProjectedXml(null);
       setProjectError(null);
       return;
     }
     let cancelled = false;
     setProjecting(true);
-    api
-      .projectTabView({ musicxml: canonical, parts: activeSpecs })
-      .then((res) => {
+    // Chain: tab projection first (ET-level), then lead-sheet per part (music21).
+    (async () => {
+      let xml = canonical;
+      if (tabSpecs.length > 0) {
+        xml = (await api.projectTabView({ musicxml: xml, parts: tabSpecs })).musicxml;
+      }
+      for (const partIndex of leadParts) {
+        xml = (await api.projectLeadsheet({ musicxml: xml, part_index: partIndex })).musicxml;
+      }
+      return xml;
+    })()
+      .then((xml) => {
         if (cancelled) return;
-        setProjectedXml(res.musicxml);
+        setProjectedXml(xml);
         setProjectError(null);
       })
       .catch((err: unknown) => {
@@ -99,7 +116,7 @@ export function ScorePane({ onNewProject, onImportAudio, onOpenMusicXml }: Score
     return () => {
       cancelled = true;
     };
-    // specsKey captures the meaningful contents of activeSpecs.
+    // specsKey captures the meaningful contents of the projection specs.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canonical, specsKey]);
 
@@ -108,8 +125,8 @@ export function ScorePane({ onNewProject, onImportAudio, onOpenMusicXml }: Score
     if (engine.project) void engine.setPartViewMode(partIndex, mode);
   };
 
-  // A tab projection is read-only: editing happens against the canonical staff.
-  const projectionActive = activeSpecs.length > 0 && projectedXml != null;
+  // A projected view (tab / lead) is read-only: editing happens against the canonical staff.
+  const projectionActive = anyProjection && projectedXml != null;
   const editEnabled = Boolean(canonical) && !projectionActive;
   const single = parts.length === 1;
 
@@ -126,6 +143,17 @@ export function ScorePane({ onNewProject, onImportAudio, onOpenMusicXml }: Score
                 onChange={(mode) => handleViewMode(p.index, mode)}
                 busy={projecting}
               />
+              {engine.project &&
+                ["tab", "both"].includes(viewModes[p.index] ?? "staff") && (
+                <TuningControl
+                  tuning={p.guitar?.tuning ?? STANDARD_GUITAR_TUNING}
+                  capo={p.guitar?.capo ?? 0}
+                  busy={projecting || engine.editorBusy}
+                  onTuning={(tuning) => void engine.setPartGuitarConfig(p.index, { tuning })}
+                  onCapo={(capo) => void engine.setPartGuitarConfig(p.index, { capo })}
+                  onRefret={() => void engine.refretPart(p.index)}
+                />
+              )}
             </div>
           ))}
           {projectionActive && (
@@ -152,6 +180,10 @@ export function ScorePane({ onNewProject, onImportAudio, onOpenMusicXml }: Score
             onNoteDuration={engine.editNoteDuration}
             onNoteArticulation={engine.editNoteArticulation}
             onNoteDynamic={engine.editNoteDynamic}
+            onNoteBend={engine.editNoteBend}
+            onNoteConnective={engine.editNoteConnective}
+            onNoteMarker={engine.editNoteMarker}
+            onNoteSpan={engine.editNoteSpan}
             onNoteRespell={engine.editNoteRespell}
             onNotePitch={engine.editNotePitch}
             onNoteTranspose={engine.transposeNote}

@@ -275,3 +275,62 @@ def test_dispatch_routes_project_snapshot_and_revert(bach_musicxml: str) -> None
     )
     assert diff2 is not None
     assert payload2["tool"] == "project.revert"
+
+
+@pytest.fixture()
+def guitar_musicxml() -> str:
+    return (Path(__file__).parent / "fixtures" / "guitar_hopo_bend.musicxml").read_text()
+
+
+def test_dispatch_routes_guitar_bend(guitar_musicxml: str) -> None:
+    payload, diff = dispatch_tool(
+        "guitar_bend",
+        {"measure_number": 1, "beat_offset": 0.0, "bend_alter": 2},
+        guitar_musicxml,
+    )
+    assert diff is not None
+    assert payload["tool"] == "guitar.bend"
+    assert "<bend>" in diff.preview_musicxml
+
+
+def test_dispatch_routes_guitar_connect(guitar_musicxml: str) -> None:
+    payload, diff = dispatch_tool(
+        "guitar_connect",
+        {"measure_number": 1, "beat_offset": 0.0, "technique": "hammer_on"},
+        guitar_musicxml,
+    )
+    assert diff is not None
+    assert payload["tool"] == "guitar.connect"
+    assert "hammer-on" in diff.preview_musicxml
+
+
+def test_dispatch_routes_guitar_connect_slide(guitar_musicxml: str) -> None:
+    payload, diff = dispatch_tool(
+        "guitar_connect",
+        {"measure_number": 1, "beat_offset": 0.0, "technique": "slide"},
+        guitar_musicxml,
+    )
+    assert diff is not None
+    assert "glissando" in diff.preview_musicxml
+
+
+def test_dispatch_routes_guitar_marker(guitar_musicxml: str) -> None:
+    payload, diff = dispatch_tool(
+        "guitar_marker",
+        {"measure_number": 1, "beat_offset": 0.0, "marker": "natural_harmonic"},
+        guitar_musicxml,
+    )
+    assert diff is not None
+    assert payload["tool"] == "guitar.marker"
+    assert "<harmonic>" in diff.preview_musicxml
+
+
+def test_dispatch_routes_guitar_span(guitar_musicxml: str) -> None:
+    payload, diff = dispatch_tool(
+        "guitar_span",
+        {"measure_number": 1, "beat_offset": 0.0, "technique": "palm_mute"},
+        guitar_musicxml,
+    )
+    assert diff is not None
+    assert payload["tool"] == "guitar.span"
+    assert "<bracket" in diff.preview_musicxml

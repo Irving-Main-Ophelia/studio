@@ -1,0 +1,41 @@
+<?xml version='1.0' encoding='utf-8'?>
+<!DOCTYPE score-partwise PUBLIC '-//Recordare//DTD MusicXML 4.0 Partwise//EN' 'http://www.musicxml.org/dtds/partwise.dtd'>
+<!-- Corpus fixture: a plain single-voice guitar measure with <string>/<fret> but
+     NO technique markings yet. The M4.1 (A2) technical edits — bend, hammer-on,
+     pull-off — are applied to this from scratch and must survive resolve → edit →
+     reload (ADR-0020). Four consecutive notes so connective spanners have a target. -->
+<score-partwise version='4.0'>
+  <part-list>
+    <score-part id='P1'><part-name>Classical Guitar</part-name></score-part>
+  </part-list>
+  <part id='P1'>
+    <measure number='1'>
+      <attributes>
+        <divisions>4</divisions>
+        <key><fifths>0</fifths></key>
+        <time><beats>4</beats><beat-type>4</beat-type></time>
+        <clef><sign>G</sign><line>2</line><clef-octave-change>-1</clef-octave-change></clef>
+      </attributes>
+      <note>
+        <pitch><step>E</step><octave>4</octave></pitch>
+        <duration>4</duration><voice>1</voice><type>quarter</type>
+        <notations><technical><string>1</string><fret>0</fret></technical></notations>
+      </note>
+      <note>
+        <pitch><step>F</step><octave>4</octave></pitch>
+        <duration>4</duration><voice>1</voice><type>quarter</type>
+        <notations><technical><string>1</string><fret>1</fret></technical></notations>
+      </note>
+      <note>
+        <pitch><step>G</step><octave>4</octave></pitch>
+        <duration>4</duration><voice>1</voice><type>quarter</type>
+        <notations><technical><string>1</string><fret>3</fret></technical></notations>
+      </note>
+      <note>
+        <pitch><step>A</step><octave>4</octave></pitch>
+        <duration>4</duration><voice>1</voice><type>quarter</type>
+        <notations><technical><string>1</string><fret>5</fret></technical></notations>
+      </note>
+    </measure>
+  </part>
+</score-partwise>

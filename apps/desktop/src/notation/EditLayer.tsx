@@ -6,7 +6,13 @@ import type { OpenSheetMusicDisplay } from "opensheetmusicdisplay";
 import { useEffect, useRef, useState } from "react";
 
 import type { MeasureRange, SelectedNote } from "../editor/SelectionState";
-import type { Articulation, Dynamic } from "../lib/api";
+import type {
+  Articulation,
+  Dynamic,
+  GuitarBracketSpan,
+  GuitarConnective,
+  GuitarMarker,
+} from "../lib/api";
 import type { ListedNoteRow } from "../lib/api";
 import { hitTestAnnotatedNote } from "./osmdAnnotate";
 import { NoteEditMenu } from "./NoteEditMenu";
@@ -40,6 +46,10 @@ export interface EditLayerProps {
   onPitch: (note: SelectedNote, pitch: string) => void;
   onTranspose: (note: SelectedNote, semitones: number) => void;
   onRemove: (note: SelectedNote) => void;
+  onBend?: (note: SelectedNote, bendAlter: number) => void;
+  onConnective?: (note: SelectedNote, technique: GuitarConnective) => void;
+  onMarker?: (note: SelectedNote, marker: GuitarMarker) => void;
+  onSpan?: (note: SelectedNote, technique: GuitarBracketSpan) => void;
   editorError?: string | null;
   busy?: boolean;
 }
@@ -80,6 +90,10 @@ export function EditLayer({
   onPitch,
   onTranspose,
   onRemove,
+  onBend,
+  onConnective,
+  onMarker,
+  onSpan,
   editorError = null,
   busy = false,
 }: EditLayerProps) {
@@ -367,6 +381,12 @@ export function EditLayer({
           onRespell={() => onRespell(menu.note)}
           onPitch={(p) => onPitch(menu.note, p)}
           onTranspose={(st) => onTranspose(menu.note, st)}
+          onBend={onBend ? (alter) => onBend(menu.note, alter) : undefined}
+          onConnective={
+            onConnective ? (technique) => onConnective(menu.note, technique) : undefined
+          }
+          onMarker={onMarker ? (marker) => onMarker(menu.note, marker) : undefined}
+          onSpan={onSpan ? (technique) => onSpan(menu.note, technique) : undefined}
           onRemove={() => {
             onRemove(menu.note);
             setMenu(null);

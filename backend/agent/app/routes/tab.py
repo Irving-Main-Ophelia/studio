@@ -14,7 +14,13 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field, field_validator
 
 from app.tools.fretboard import DEFAULT_MAX_FRET, STANDARD_TUNING
-from app.tools.tab_projection import PartView, VIEW_MODES, project_views
+from app.tools.leadsheet_projection import project_leadsheet
+from app.tools.tab_projection import (
+    PartView,
+    VIEW_MODES,
+    project_views,
+    reassign_fret_positions,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +67,22 @@ class TabProjectResponse(BaseModel):
     musicxml: str
 
 
+class RefretIn(BaseModel):
+    musicxml: str
+    part_index: int = Field(0, ge=0)
+    tuning: list[str] | None = Field(
+        None, description="Open-string pitch names, string 1 (highest) first. Null ⇒ standard."
+    )
+    capo: int = Field(0, ge=0, le=24)
+    max_fret: int = Field(DEFAULT_MAX_FRET, ge=1, le=36)
+
+
+class RefretResponse(BaseModel):
+    musicxml: str
+    reassigned: int
+    cleared: int
+
+
 @router.post("/project", response_model=TabProjectResponse)
 def route_project_view(req: TabProjectIn) -> TabProjectResponse:
     if req.parts is not None:
@@ -95,3 +117,52 @@ def route_project_view(req: TabProjectIn) -> TabProjectResponse:
         logger.warning("tab projection failed: %s", exc)
         raise HTTPException(status_code=400, detail=f"Could not project tab view: {exc}") from exc
     return TabProjectResponse(musicxml=out)
+
+
+class LeadsheetIn(BaseModel):
+    musicxml: str
+    part_index: int = Field(0, ge=0)
+    slashes: bool = True
+    chords: bool = True
+
+
+class LeadsheetResponse(BaseModel):
+    musicxml: str
+    chord_symbols: int
+
+
+@router.post("/leadsheet", response_model=LeadsheetResponse)
+def route_leadsheet(req: LeadsheetIn) -> LeadsheetResponse:
+    """Project a part to a lead sheet — slash noteheads + chord symbols (A8)."""
+    try:
+        result = project_leadsheet(
+            req.musicxml,
+            part_index=req.part_index,
+            slashes=req.slashes,
+            chords=req.chords,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("leadsheet projection failed: %s", exc)
+        raise HTTPException(status_code=400, detail=f"Could not build lead sheet: {exc}") from exc
+    return LeadsheetResponse(**result)
+
+
+@router.post("/refret", response_model=RefretResponse)
+def route_refret(req: RefretIn) -> RefretResponse:
+    """Rewrite a part's tab positions from its current pitches + tuning/capo (A3)."""
+    try:
+        result = reassign_fret_positions(
+            req.musicxml,
+            part_index=req.part_index,
+            tuning=req.tuning,
+            capo=req.capo,
+            max_fret=req.max_fret,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001 — surface parse failures as 400, not 500
+        logger.warning("refret failed: %s", exc)
+        raise HTTPException(status_code=400, detail=f"Could not refret part: {exc}") from exc
+    return RefretResponse(**result)
