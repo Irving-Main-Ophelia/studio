@@ -13,11 +13,12 @@ import logging
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field, field_validator
 
+from app.tools.chord_diagrams import DENSITIES, chord_diagrams
 from app.tools.fretboard import DEFAULT_MAX_FRET, STANDARD_TUNING
 from app.tools.leadsheet_projection import project_leadsheet
 from app.tools.tab_projection import (
-    PartView,
     VIEW_MODES,
+    PartView,
     project_views,
     reassign_fret_positions,
 )
@@ -147,6 +148,58 @@ def route_leadsheet(req: LeadsheetIn) -> LeadsheetResponse:
         logger.warning("leadsheet projection failed: %s", exc)
         raise HTTPException(status_code=400, detail=f"Could not build lead sheet: {exc}") from exc
     return LeadsheetResponse(**result)
+
+
+class ChordDiagramsIn(BaseModel):
+    musicxml: str
+    tuning: list[str] | None = Field(
+        None, description="Open-string pitch names, string 1 (highest) first. Null ⇒ standard."
+    )
+    capo: int = Field(0, ge=0, le=24)
+    density: str = Field("changes", description=f"One of: {DENSITIES}")
+    max_fret: int = Field(15, ge=3, le=24)
+
+    @field_validator("density")
+    @classmethod
+    def _density_allowed(cls, v: str) -> str:
+        if v not in DENSITIES:
+            raise ValueError(f"Unsupported density '{v}'. Allowed: {DENSITIES}")
+        return v
+
+
+class ChordDiagramOut(BaseModel):
+    measure: int
+    chord: str
+    base_fret: int
+    frets: list[int]  # per string (1 first); -1 = muted, 0 = open
+    difficulty: str
+
+
+class ChordDiagramsResponse(BaseModel):
+    diagrams: list[ChordDiagramOut]
+    count: int
+    density: str
+
+
+@router.post("/chord-diagrams", response_model=ChordDiagramsResponse)
+def route_chord_diagrams(req: ChordDiagramsIn) -> ChordDiagramsResponse:
+    """Auto chord diagrams above the staff, thinned by a density control (A5 §4.7 Q2)."""
+    try:
+        result = chord_diagrams(
+            req.musicxml,
+            tuning=req.tuning,
+            capo=req.capo,
+            density=req.density,
+            max_fret=req.max_fret,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001 — surface parse failures as 400, not 500
+        logger.warning("chord diagrams failed: %s", exc)
+        raise HTTPException(
+            status_code=400, detail=f"Could not derive chord diagrams: {exc}"
+        ) from exc
+    return ChordDiagramsResponse(**result)
 
 
 @router.post("/refret", response_model=RefretResponse)

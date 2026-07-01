@@ -11,6 +11,7 @@ import { TransposeDialog } from "../editor/TransposeDialog";
 import { useScoreEngine } from "../lib/ScoreEngine";
 import { isTauri } from "../lib/tauri";
 import { useKeyboardShortcuts } from "../lib/useKeyboardShortcuts";
+import { GuitarProPreview } from "../notation/guitarpro/GuitarProPreview";
 import { importGuitarProBytes, isGuitarProFile } from "../notation/guitarpro/importGuitarPro";
 import { NewProjectDialog } from "../project/NewProjectDialog";
 import { RecoveryBanner } from "../project/RecoveryBanner";
@@ -51,6 +52,9 @@ export function Shell({ info }: { info: AppInfo }) {
   const [generateOpen, setGenerateOpen] = useState(false);
   const [orchestrationOpen, setOrchestrationOpen] = useState(false);
   const [audioImportOpen, setAudioImportOpen] = useState(false);
+  // Guitar Pro files preview in alphaTab before conversion (A7 optional player).
+  const [gpPreview, setGpPreview] = useState<{ filename: string; bytes: Uint8Array } | null>(null);
+  const [gpImporting, setGpImporting] = useState(false);
 
   const openMusicXml = () => xmlInputRef.current?.click();
 
@@ -59,17 +63,29 @@ export function Shell({ info }: { info: AppInfo }) {
     if (!file) return;
     e.target.value = "";
     if (isGuitarProFile(file.name)) {
-      // alphaTab parses the binary GP model; we convert to MusicXML (ADR-0019).
+      // Preview the GP file in alphaTab; conversion to MusicXML waits for confirm.
       const bytes = new Uint8Array(await file.arrayBuffer());
-      const { musicxml, warnings } = await importGuitarProBytes(bytes);
-      if (warnings.length) {
-        console.warn(`Guitar Pro import: ${warnings.length} effect(s) not converted —`, warnings);
-      }
-      await engine.loadFromXml(file.name, musicxml);
+      setGpPreview({ filename: file.name, bytes });
       return;
     }
     const text = await file.text();
     await engine.loadFromXml(file.name, text);
+  };
+
+  const confirmGpImport = async () => {
+    if (!gpPreview) return;
+    setGpImporting(true);
+    try {
+      // alphaTab parses the binary GP model; we convert to MusicXML (ADR-0019).
+      const { musicxml, warnings } = await importGuitarProBytes(gpPreview.bytes);
+      if (warnings.length) {
+        console.warn(`Guitar Pro import: ${warnings.length} effect(s) not converted —`, warnings);
+      }
+      await engine.loadFromXml(gpPreview.filename, musicxml);
+      setGpPreview(null);
+    } finally {
+      setGpImporting(false);
+    }
   };
 
   // Ensure the shell div has focus on mount so keyboard shortcuts are captured.
@@ -156,6 +172,14 @@ export function Shell({ info }: { info: AppInfo }) {
       <GenerateScoreDialog open={generateOpen} onClose={() => setGenerateOpen(false)} />
       <OrchestrationDialog open={orchestrationOpen} onClose={() => setOrchestrationOpen(false)} />
       <AudioImportDialog open={audioImportOpen} onClose={() => setAudioImportOpen(false)} />
+      <GuitarProPreview
+        open={gpPreview != null}
+        filename={gpPreview?.filename ?? null}
+        bytes={gpPreview?.bytes ?? null}
+        importing={gpImporting}
+        onCancel={() => setGpPreview(null)}
+        onImport={() => void confirmGpImport()}
+      />
       <CommandPalette
         open={paletteOpen}
         onClose={() => setPaletteOpen(false)}

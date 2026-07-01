@@ -383,6 +383,21 @@ export const api = {
   }) =>
     post<{ musicxml: string; chord_symbols: number }>("/score/tab/leadsheet", req),
 
+  // Auto chord-diagrams above the staff (A5 §4.7 Q2). Read-only derivation from the
+  // whole-score harmony; density thins the result. Drawn as an SVG strip, not OSMD.
+  chordDiagrams: (req: {
+    musicxml: string;
+    tuning?: string[] | null;
+    capo?: number;
+    density?: "unique" | "changes" | "all";
+    max_fret?: number;
+  }) =>
+    post<{
+      diagrams: { measure: number; chord: string; base_fret: number; frets: number[]; difficulty: string }[];
+      count: number;
+      density: string;
+    }>("/score/tab/chord-diagrams", req),
+
   // Fretboard chord/scale engine (A5 + A6). Read-only derivations.
   chordVoicings: (req: {
     chord: string;

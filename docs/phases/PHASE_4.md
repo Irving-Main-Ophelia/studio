@@ -107,9 +107,15 @@ has a test.
       pitch classes + the fret model + a window search), not from a static DB; reachable from the agent
       (`guitar_chord_voicings`) and the fretboard panel. Ranked by root-in-bass / openness / position
       (`test_guitar_engine.py` asserts the open-chord shapes).
-- [~] Auto chord-**diagrams** above the staff with a density control (§4.7 Q2): **not done** — the engine
-      generates voicings **on demand**, and A8's lead-sheet adds chord **symbols** (text) above the staff;
-      the auto-grid-diagram density toggle is the one remaining A5 follow-up.
+- [x] Auto chord-**diagrams** above the staff with a density control (§4.7 Q2): **landed** — a
+      `ChordDiagramStrip` above the score renders fret-grid diagrams derived from the whole-score harmony
+      (`app/tools/chord_diagrams.py` + `POST /score/tab/chord-diagrams`, shared harmony extraction with the
+      lead-sheet, voiced by `guitar_engine`). **Opt-in, off by default**, GP8-style density
+      (`off / unique / changes / all`; session-local, no schema bump). *Render seam:* OSMD does **not** draw
+      MusicXML `<frame>` diagrams, so — like the A4 fretboard — the diagrams are an **SVG annotation strip**
+      (`notation/ChordDiagram.tsx`), not a projection into OSMD; OSMD stays the single staff renderer
+      (ADR-0015/0019 intact). Tested (`test_chord_diagrams.py`: density modes + round-trip;
+      `ChordDiagram.test.tsx`: grid/muted/open rendering).
 
 **A6 — Scale engine** *(M4.3 — landed)*
 
@@ -125,7 +131,13 @@ has a test.
       `ScoreLoader.loadScoreFromBytes` path is exercised. Coverage is the core set
       (pitch/rhythm/voices/string-fret/ties/harmonics/HOPO); other effects degrade with a counted warning
       (ADR-0017). alphaTab is **dynamically imported** (code-split: ~1.2 MB out of the startup bundle).
-- [ ] *(Optional)* alphaTab's player preview — not done (deferred; optional).
+- [x] *(Optional)* alphaTab's player preview — **landed.** Opening a `.gp/.gpx/.gp5` now shows a
+      `GuitarProPreview` modal that renders the file with alphaTab's native engine and plays it with
+      alphaTab's built-in synth (soundfont + Bravura shipped as Vite `?url` assets), so the maintainer can
+      hear techniques the app doesn't yet voice (Phase 7) and A/B the original against the lossy conversion
+      before committing. alphaTab stays **preview-only** (dynamically imported, own chunk; OSMD stays the
+      single staff renderer — ADR-0019); audio degrades gracefully to a silent visual preview if the synth
+      can't init. Import converts to MusicXML on confirm (`GuitarProPreview.test.tsx`).
 - [x] No user-facing `.gp` **export** (§4.7 Q3) — MusicXML is the interchange truth.
 
 **A8 — Rhythmic/slash notation & chord charts** *(M4.4 — landed)*
@@ -139,10 +151,11 @@ has a test.
 **General**
 
 - [x] ADRs written: **0018** (schema v3) + **0019** (alphaTab import-only) + **0020** (technical model).
-- [~] `git tag v0.4.0-tablature`: **not yet cut.** All workstreams A1–A8 have landed and round-trip with
-      tests (rust 11 · backend 192 · frontend 90 green). The remaining open items before the tag are the
-      **A5 auto-chord-diagram density toggle** (§4.7 Q2) and the optional A7 alphaTab player preview — plus
-      a maintainer demo pass. Cut the tag once those are closed or explicitly waived.
+- [x] `git tag v0.4.0-tablature`: **cut** (June 30, 2026). All workstreams A1–A8 landed and round-trip with
+      tests (rust 11 · backend 199 · frontend 99 green; production build clean). Both former follow-ups —
+      the **A5 auto-chord-diagram density toggle** (§4.7 Q2) and the *optional* **A7 alphaTab player
+      preview** — are done. The maintainer demo pass was **waived by maintainer directive** (June 30, 2026):
+      Phase 4 is closed and Phase 5 is next.
 
 ---
 
@@ -243,10 +256,10 @@ priority; lands last.
 
 | Milestone | Workstreams | Status | Tag |
 |---|---|---|---|
-| **M4.0 — Tab view & GP import** | A1 (per-part toggle + projection) + A7 (alphaTab import, code-split) + minimal A3 (fret math + schema v3) | ✅ **landed & verified** (rust 11 · backend 34 tab + suite · frontend 84 green; tab/both **visually confirmed** in OSMD). Deferred to later milestones: tuning/capo UI + transpose respelling (M4.2), alphaTab player preview (optional). | — |
+| **M4.0 — Tab view & GP import** | A1 (per-part toggle + projection) + A7 (alphaTab import, code-split) + minimal A3 (fret math + schema v3) | ✅ **landed & verified** (rust 11 · backend 34 tab + suite · frontend 84 green; tab/both **visually confirmed** in OSMD). Deferred to later milestones: tuning/capo UI + transpose respelling (M4.2). The optional alphaTab player preview later **landed** (`GuitarProPreview`). | — |
 | **M4.1 — Guitar articulations** | A2 (core set: bend, slide, HOPO, palm mute, let ring, vibrato, harmonics, dead/ghost, strum) | ✅ **core set landed** (ADR-0020). All 10 techniques round-trip-tested + hand- and agent-editable via `/score/edit/technical/*` + `guitar_{bend,connect,marker,span}`. Follow-ups: OSMD per-glyph visual check + arbitrary-range span UI. | — |
 | **M4.2 — Tunings, capo, fret math** | A3 full (tuning/capo **UI** + custom + transpose respelling) | ✅ landed (`TuningControl` + `/score/tab/refret`). | — |
-| **M4.3 — Fretboard + chord/scale engines** | A4 + A5 + A6 | ✅ landed (`Fretboard`/`FretboardPanel` + `guitar_engine` + `/guitar/*`). A5 auto-diagram density toggle is the one follow-up. | — |
+| **M4.3 — Fretboard + chord/scale engines** | A4 + A5 + A6 | ✅ landed (`Fretboard`/`FretboardPanel` + `guitar_engine` + `/guitar/*`). A5 auto-diagram density toggle **now landed** (`ChordDiagramStrip` + `/score/tab/chord-diagrams`). | — |
 | **M4.4 — Lead-sheet mode** | A8 | ✅ landed (`leadsheet_projection` + "lead" view mode). | `v0.4.0-tablature` |
 
 > M4.0 and M4.1 are independent and could run in parallel; M4.0 ships first because it is cheap and

@@ -4,6 +4,7 @@ import { EditorStatusBar } from "../editor/EditorStatusBar";
 import { NoteEditToolbar } from "../editor/NoteEditToolbar";
 import { api } from "../lib/api";
 import { useScoreEngine } from "../lib/ScoreEngine";
+import { ChordDiagramStrip, type ChordDensity, type DiagramRow } from "../notation/ChordDiagramStrip";
 import { ScoreView } from "../notation/ScoreView";
 import { TuningControl } from "../notation/TuningControl";
 import { ViewModeToggle } from "../notation/ViewModeToggle";
@@ -125,6 +126,51 @@ export function ScorePane({ onNewProject, onImportAudio, onOpenMusicXml }: Score
     if (engine.project) void engine.setPartViewMode(partIndex, mode);
   };
 
+  // Auto chord-diagrams above the staff (A5 §4.7 Q2): opt-in, off by default, a
+  // session-local preference (no schema bump). Voiced against the first guitar part's
+  // tuning/capo, else standard — the diagrams are derived from the whole score's harmony.
+  const [diagramDensity, setDiagramDensity] = useState<ChordDensity>("off");
+  const [diagrams, setDiagrams] = useState<DiagramRow[]>([]);
+  const [diagramsBusy, setDiagramsBusy] = useState(false);
+  const [diagramsError, setDiagramsError] = useState<string | null>(null);
+  const diagramGuitar = useMemo(
+    () => parts.find((p) => p.guitar)?.guitar ?? null,
+    [parts],
+  );
+
+  useEffect(() => {
+    if (!canonical || diagramDensity === "off") {
+      setDiagrams([]);
+      setDiagramsError(null);
+      return;
+    }
+    let cancelled = false;
+    setDiagramsBusy(true);
+    api
+      .chordDiagrams({
+        musicxml: canonical,
+        tuning: diagramGuitar?.tuning ?? null,
+        capo: diagramGuitar?.capo ?? 0,
+        density: diagramDensity,
+      })
+      .then((res) => {
+        if (cancelled) return;
+        setDiagrams(res.diagrams);
+        setDiagramsError(null);
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setDiagrams([]);
+        setDiagramsError(err instanceof Error ? err.message : String(err));
+      })
+      .finally(() => {
+        if (!cancelled) setDiagramsBusy(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [canonical, diagramDensity, diagramGuitar]);
+
   // A projected view (tab / lead) is read-only: editing happens against the canonical staff.
   const projectionActive = anyProjection && projectedXml != null;
   const editEnabled = Boolean(canonical) && !projectionActive;
@@ -161,6 +207,15 @@ export function ScorePane({ onNewProject, onImportAudio, onOpenMusicXml }: Score
           )}
           {projectError && <span className="text-danger">Tab view failed: {projectError}</span>}
         </div>
+      )}
+      {canonical && parts.length > 0 && (
+        <ChordDiagramStrip
+          density={diagramDensity}
+          onDensity={setDiagramDensity}
+          diagrams={diagrams}
+          busy={diagramsBusy}
+          error={diagramsError}
+        />
       )}
       <div className="flex-1 min-h-0 overflow-auto p-6">
         <div className="mx-auto h-full w-full max-w-5xl">
