@@ -9,7 +9,7 @@
 //! ├── operations.log          (JSONL, append-only, fsync-on-write)
 //! ├── snapshots/              (periodic snapshots; populated from M1.0 onward)
 //! ├── renders/                (WAV renders; written by M1.2 audio engine)
-//! ├── takes/                  (audio + MIDI captures; populated in Phase 2)
+//! ├── takes/                  (audio + MIDI captures; populated in Phase 5)
 //! └── exports/                (user-triggered exports; M1.5)
 //! ```
 //!
@@ -44,7 +44,11 @@ use uuid::Uuid;
 /// - v3: Phase-4 (M4.0/M4.2) — adds an optional per-part `guitar` block
 ///   (tuning / capo / profile / view_mode) for tablature. Absent ⇒ non-fretted
 ///   part, standard staff (today's behaviour). See ADR-0018.
-pub const SCHEMA_VERSION: u32 = 3;
+/// - v4: Phase-5 (M5.0) — promotes the reserved `audio_clips` and `markers`
+///   slots from opaque `Vec<JsonValue>` to typed shapes ([`AudioClip`] /
+///   [`Marker`]). The v3→v4 migration is additive (a v3 project wrote both as
+///   `[]`, which deserialises into an empty typed `Vec`). See ADR-0021.
+pub const SCHEMA_VERSION: u32 = 4;
 
 /// Per-part guitar/fretted-instrument metadata. Reserved (schema v3) for Phase 4
 /// (Track A). `None` on an [`InstrumentationEntry`] means a non-fretted part that
@@ -74,6 +78,59 @@ pub struct InstrumentationEntry {
     /// non-fretted parts (kept off-disk so they stay byte-stable). See ADR-0018.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub guitar: Option<GuitarConfig>,
+}
+
+/// Fade envelope on a clip's edges (schema v4 — ADR-0021). Durations are in
+/// seconds; `0` = a hard edge (no fade). The curve/`shape` of a crossfade is a
+/// later additive concern (B3) and is intentionally omitted here.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct ClipFades {
+    /// Fade-in length from the clip's start, in seconds.
+    #[serde(default)]
+    pub fade_in: f64,
+    /// Fade-out length to the clip's end, in seconds.
+    #[serde(default)]
+    pub fade_out: f64,
+}
+
+/// A non-destructive audio clip: a placement of a `takes/` recording on the
+/// timeline (schema v4 — ADR-0021, promoted from the reserved v2 slot). The
+/// take file is immutable; a clip only *references* it. Trim/split/move/duplicate
+/// (Phase-5 B2) mutate this shape as `Operation`s, never the take.
+///
+/// `offset`/`length` are in **seconds**: `offset` is the clip's start on the
+/// arrangement timeline (what "move" edits), `length` is how long it sounds.
+/// Trimming the take's source in-point is a later, additive field (M5.1).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AudioClip {
+    pub id: String,
+    /// Id of the take in `takes/` this clip plays.
+    pub take_id: String,
+    /// Timeline start position, seconds from the song origin.
+    #[serde(default)]
+    pub offset: f64,
+    /// Clip length, in seconds.
+    #[serde(default)]
+    pub length: f64,
+    /// Per-clip gain in dB (Phase-5 B5), independent of Phase-6 track automation.
+    /// `0` = unity. Named `gain_db` to match `MixerTrack`/`MixerMaster`.
+    #[serde(default)]
+    pub gain_db: f32,
+    /// Fade envelope on this clip's edges (Phase-5 B3).
+    #[serde(default)]
+    pub fades: ClipFades,
+}
+
+/// A named song-position marker / memory location (schema v4 — ADR-0021,
+/// promoted from the reserved v2 slot). Phase-5 B7 recalls/jumps to these and
+/// loops between two of them; `analyze_form` may auto-populate them later.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Marker {
+    pub id: String,
+    pub name: String,
+    /// Song position, seconds from the origin.
+    #[serde(default)]
+    pub position: f64,
 }
 
 /// Mirrors `project.json#mixer.tracks[*]`.
@@ -127,7 +184,7 @@ pub struct AgentState {
     pub pinned_explanations: Vec<String>,
 }
 
-/// Mirrors the on-disk `project.json` (schema v3 — see [`SCHEMA_VERSION`]).
+/// Mirrors the on-disk `project.json` (schema v4 — see [`SCHEMA_VERSION`]).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectMeta {
     #[serde(default = "default_schema_version")]
@@ -152,12 +209,15 @@ pub struct ProjectMeta {
     /// Reserved (schema v2) for Track C — per-track/param automation breakpoint lanes. Empty until Phase 6.
     #[serde(default)]
     pub automation: Vec<JsonValue>,
-    /// Reserved (schema v2) for Track B — references into `takes/` with offsets + clip gain. Empty until Phase 5.
+    /// Track B — non-destructive audio clips referencing `takes/` recordings
+    /// (schema v4, promoted from the reserved v2 slot; ADR-0021). Empty on a
+    /// project with no audio.
     #[serde(default)]
-    pub audio_clips: Vec<JsonValue>,
-    /// Reserved (schema v2) for Track B — named song-position markers (tie to analyze_form). Empty until Phase 5.
+    pub audio_clips: Vec<AudioClip>,
+    /// Track B — named song-position markers (schema v4, promoted from the
+    /// reserved v2 slot; ADR-0021). May be auto-populated from `analyze_form`.
     #[serde(default)]
-    pub markers: Vec<JsonValue>,
+    pub markers: Vec<Marker>,
     /// Index of the last operation that has been folded into `score.musicxml`.
     /// `-1` means the project is brand-new and has never had an operation.
     #[serde(default = "default_last_op_index")]
@@ -176,13 +236,17 @@ fn default_last_op_index() -> i64 {
 /// changed (so the caller rewrites `project.json`), `false` when already current.
 /// Errors only on a *newer*-than-supported schema.
 ///
-/// Both migrations so far are purely additive, so neither needs field transforms:
+/// Every migration so far is purely additive, so none needs field transforms:
 /// - v1 → v2: reserves the DAW shapes (per-track sends/inserts/group, mixer buses,
 ///   master inserts, automation, audio_clips, markers).
 /// - v2 → v3: adds the optional per-part `guitar` block (ADR-0018).
+/// - v3 → v4: promotes the reserved `audio_clips`/`markers` slots to typed shapes
+///   ([`AudioClip`] / [`Marker`]); a v3 project wrote both as `[]`, which parses
+///   into an empty typed `Vec` (ADR-0021).
+///
 /// New fields deserialise to empty/`None` via `#[serde(default)]`, so the in-memory
 /// struct is already correct after parsing — migration just stamps the new version
-/// (a v1 project jumps straight to v3 in one stamp). Future migrations that *do*
+/// (a v1 project jumps straight to v4 in one stamp). Future migrations that *do*
 /// need transforms should chain stepwise here.
 fn migrate_meta(meta: &mut ProjectMeta) -> Result<bool, String> {
     if meta.schema_version > SCHEMA_VERSION {
@@ -525,8 +589,9 @@ pub fn project_open(path: PathBuf) -> Result<ProjectHandle, String> {
     let mut meta: ProjectMeta =
         serde_json::from_slice(&meta_bytes).map_err(|e| format!("parse project.json: {e}"))?;
 
-    // On-load migration (ADR-0016). A v1 project upgrades to v2 in place; the new
-    // DAW fields default to empty via `#[serde(default)]`, so the upgrade is lossless.
+    // On-load migration (ADR-0016 → 0021). An older project upgrades to the current
+    // schema in place; every added field is additive and defaults to empty/`None`
+    // via `#[serde(default)]`, so the upgrade is lossless.
     let from_version = meta.schema_version;
     if migrate_meta(&mut meta)? {
         let bytes = serde_json::to_vec_pretty(&meta)
@@ -957,5 +1022,120 @@ mod tests {
             .join("nested")
             .join("score.musicxml.tmp")
             .exists());
+    }
+
+    #[test]
+    fn round_trips_audio_clips_and_markers() {
+        // Schema v4 (ADR-0021): the promoted `audio_clips`/`markers` shapes survive
+        // save → reload with their typed fields intact.
+        let tmp = tempdir().unwrap();
+        let handle = project_new(build_spec("Session", tmp.path())).unwrap();
+
+        let mut meta = handle.meta.clone();
+        assert_eq!(meta.schema_version, SCHEMA_VERSION);
+        meta.audio_clips = vec![
+            AudioClip {
+                id: "clip-a".into(),
+                take_id: "take-001".into(),
+                offset: 0.0,
+                length: 4.5,
+                gain_db: -3.0,
+                fades: ClipFades { fade_in: 0.01, fade_out: 0.25 },
+            },
+            AudioClip {
+                id: "clip-b".into(),
+                take_id: "take-002".into(),
+                offset: 4.5,
+                length: 2.0,
+                gain_db: 0.0,
+                fades: ClipFades::default(),
+            },
+        ];
+        meta.markers = vec![
+            Marker { id: "m1".into(), name: "Intro".into(), position: 0.0 },
+            Marker { id: "m2".into(), name: "Chorus".into(), position: 4.5 },
+        ];
+
+        let req = SaveRequest {
+            path: handle.path.clone(),
+            meta: meta.clone(),
+            score_musicxml: "<score-partwise/>".into(),
+            operation: Some(fake_op(1)),
+        };
+        project_save(req).expect("save clips + markers");
+
+        let reopened = project_open(handle.path.clone()).expect("reopen");
+        assert_eq!(reopened.meta.schema_version, SCHEMA_VERSION);
+        assert_eq!(reopened.meta.audio_clips, meta.audio_clips);
+        assert_eq!(reopened.meta.markers, meta.markers);
+        // Spot-check a nested value survived the JSON round-trip.
+        assert_eq!(reopened.meta.audio_clips[0].fades.fade_out, 0.25);
+        assert_eq!(reopened.meta.markers[1].name, "Chorus");
+    }
+
+    #[test]
+    fn migrates_v3_project_to_v4_and_preserves_reserved_slots() {
+        let tmp = tempdir().unwrap();
+        let dir = tmp.path().join("v3");
+        fs::create_dir_all(&dir).unwrap();
+
+        // A schema-v3 project.json: the DAW slots exist but are still empty `[]`
+        // (their reserved shape before Phase 5), plus a guitar block from Phase 4.
+        // v3 → v4 is additive: those empty arrays parse into empty typed `Vec`s.
+        let v3 = json!({
+            "schema_version": 3,
+            "id": "v3-id",
+            "title": "Pre-Audio Piece",
+            "composer": "Irving",
+            "created_at": "2026-06-01T00:00:00Z",
+            "updated_at": "2026-06-01T00:00:00Z",
+            "tempo_bpm": 110.0,
+            "time_signature": "4/4",
+            "key_signature": "E minor",
+            "instrumentation": [{
+                "id": "guitar", "instrument": "guitar", "channel": 0,
+                "guitar": {
+                    "tuning": ["E4","B3","G3","D3","A2","E2"],
+                    "capo": 0, "profile": "steel", "view_mode": "tab"
+                }
+            }],
+            "mixer": {
+                "tracks": [{ "id": "guitar", "gain_db": -1.5, "pan": 0.0, "mute": false, "solo": false }],
+                "master": { "gain_db": 0.0 }
+            },
+            "agent_state": { "last_seen_message_count": 0, "pinned_explanations": [] },
+            "automation": [],
+            "audio_clips": [],
+            "markers": [],
+            "last_op_index": 0
+        });
+        atomic_write(&dir.join("project.json"), &serde_json::to_vec_pretty(&v3).unwrap()).unwrap();
+        atomic_write(&dir.join("score.musicxml"), b"<score-partwise/>").unwrap();
+        append_journal(&dir.join("operations.log"), &fake_op(0)).unwrap();
+
+        // Open → migrates v3 → v4 and rewrites project.json.
+        let handle = project_open(dir.clone()).expect("open + migrate v3");
+        assert_eq!(handle.meta.schema_version, SCHEMA_VERSION);
+
+        // Promoted slots are present, typed, and empty.
+        assert!(handle.meta.audio_clips.is_empty());
+        assert!(handle.meta.markers.is_empty());
+
+        // Unchanged v3 data is preserved exactly.
+        assert_eq!(handle.meta.title, "Pre-Audio Piece");
+        assert_eq!(handle.meta.mixer.tracks[0].gain_db, -1.5);
+        let gtr = handle.meta.instrumentation[0].guitar.as_ref().unwrap();
+        assert_eq!(gtr.profile, "steel");
+        assert_eq!(gtr.view_mode, "tab");
+
+        // The migration rewrite is byte-stable: a second open (already current)
+        // does not re-migrate or rewrite project.json.
+        let after_first = fs::read(dir.join("project.json")).unwrap();
+        let _ = project_open(dir.clone()).expect("reopen migrated v4");
+        let after_second = fs::read(dir.join("project.json")).unwrap();
+        assert_eq!(
+            after_first, after_second,
+            "second open must not rewrite an already-current project"
+        );
     }
 }

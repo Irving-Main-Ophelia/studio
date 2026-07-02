@@ -54,12 +54,29 @@ import {
   buildScoreReplaceOp,
   buildScoreTransposeOp,
 } from "../project/OperationLog";
+import { isTauri } from "./tauri";
 import { projectPersistence } from "../project/persistence";
+import {
+  applyAudioEdit,
+  buildAudioClipAddOp,
+  buildAudioClipRemoveOp,
+  buildAudioClipSetGainOp,
+  buildMarkerAddOp,
+  buildMarkerMoveOp,
+  buildMarkerRemoveOp,
+  clipFromTake,
+  isAudioEditKind,
+  makeMarker,
+  type TakeRef,
+} from "../project/audioEdits";
 import type {
+  AudioClip,
   GuitarConfig,
+  Marker,
   NewProjectSpec,
   OperationRecord,
   ProjectHandle,
+  ProjectMeta,
   RecentProject,
   ViewMode,
 } from "../project/types";
@@ -211,6 +228,17 @@ interface ScoreEngineValue {
   discardPendingRecovery: () => void;
   undo: () => Promise<void>;
   redo: () => Promise<void>;
+
+  /* --- audio clips & markers (Phase-5 B2/B5/B7) ------------------- */
+  /** Create a non-destructive clip referencing a recorded take (ADR-0021/0022). */
+  addTakeClip: (take: TakeRef, offset?: number) => Promise<AudioClip | null>;
+  removeAudioClip: (clipId: string) => Promise<void>;
+  /** Set a clip's per-clip gain in dB (B5). */
+  setClipGain: (clipId: string, gainDb: number) => Promise<void>;
+  /** Drop a named marker at a song position in seconds (B7). */
+  addMarker: (name: string, position: number) => Promise<Marker | null>;
+  removeMarker: (markerId: string) => Promise<void>;
+  moveMarker: (markerId: string, position: number) => Promise<void>;
 
   /* editor (M1.1) */
   handleEditorIntent: (intent: EditorIntent) => Promise<void>;
@@ -425,6 +453,39 @@ export function ScoreEngineProvider({ children }: { children: React.ReactNode })
       playerRef.current = null;
     };
   }, []);
+
+  // Keep the player's audio-clip set in sync with the project and decode any
+  // newly-referenced takes from disk (Phase-5 B1 playback). Takes are decoded
+  // once, keyed by id; pruning drops buffers no clip references anymore.
+  useEffect(() => {
+    const player = playerRef.current;
+    if (!player) return;
+    player.setClips(project?.meta.audio_clips ?? []);
+    player.pruneClipBuffers();
+    if (!isTauri() || !project) return;
+    const missing = player.missingTakeIds();
+    if (missing.length === 0) return;
+    let cancelled = false;
+    void (async () => {
+      const { readFile } = await import("@tauri-apps/plugin-fs");
+      for (const takeId of missing) {
+        if (cancelled) return;
+        try {
+          const bytes = await readFile(`${project.path}/takes/${takeId}.wav`);
+          const buf = bytes.buffer.slice(
+            bytes.byteOffset,
+            bytes.byteOffset + bytes.byteLength,
+          ) as ArrayBuffer;
+          await player.loadClipTake(takeId, buf);
+        } catch (err) {
+          console.warn(`could not load take ${takeId} for playback:`, err);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [project]);
 
   // Backend health probe on mount.
   useEffect(() => {
@@ -722,8 +783,9 @@ export function ScoreEngineProvider({ children }: { children: React.ReactNode })
     player.setLoop(loop);
     player.setPlaybackRate(practiceTempo);
     player.setMixerSnapshot(mixer);
+    player.setClips(project?.meta.audio_clips ?? []);
     void player.play(s.extracted.notes, s.extracted.duration_sec);
-  }, [score, countInBars, clickEnabled, loop, mixer, practiceTempo]);
+  }, [score, countInBars, clickEnabled, loop, mixer, practiceTempo, project]);
 
   const stop = useCallback(() => {
     playerRef.current?.stop();
@@ -764,9 +826,10 @@ export function ScoreEngineProvider({ children }: { children: React.ReactNode })
       player.setLoop(loop);
       player.setPlaybackRate(practiceTempo);
       player.setMixerSnapshot(mixer);
+      player.setClips(project?.meta.audio_clips ?? []);
       await player.play(s.extracted.notes, s.extracted.duration_sec, seconds);
     },
-    [score, countInBars, clickEnabled, loop, mixer, practiceTempo],
+    [score, countInBars, clickEnabled, loop, mixer, practiceTempo, project],
   );
 
   const playFromCursor = useCallback(async () => {
@@ -879,6 +942,106 @@ export function ScoreEngineProvider({ children }: { children: React.ReactNode })
       }
     },
     [ingestMusicXml, score, project, persistProjectSave],
+  );
+
+  /* --------- audio clips & markers (Phase-5 B2/B5/B7) ---------------- */
+
+  // Journal a clip/marker op and persist the resulting `meta`. Unlike
+  // `applyAndPersistOperation` these edits live in `project.json` metadata, not
+  // the MusicXML body, so the score is untouched (ADR-0021).
+  const applyAndPersistMetaOp = useCallback(
+    async (nextMeta: ProjectMeta, op: OperationRecord) => {
+      if (!project) return;
+      opLogRef.current.append(op);
+      setOpVersion((n) => n + 1);
+      const nextHandle: ProjectHandle = { ...project, meta: nextMeta };
+      try {
+        await persistProjectSave(
+          nextHandle,
+          score?.musicxml ?? nextHandle.score_musicxml,
+          op,
+        );
+      } catch {
+        setIsDirty(true);
+      }
+    },
+    [project, score, persistProjectSave],
+  );
+
+  const addTakeClip = useCallback(
+    async (take: TakeRef, offset = 0): Promise<AudioClip | null> => {
+      if (!project) return null;
+      const clip = clipFromTake(take, offset);
+      const op = buildAudioClipAddOp(clip, opLogRef.current.nextIndex);
+      await applyAndPersistMetaOp(applyAudioEdit(project.meta, op), op);
+      return clip;
+    },
+    [project, applyAndPersistMetaOp],
+  );
+
+  const removeAudioClip = useCallback(
+    async (clipId: string) => {
+      if (!project) return;
+      const clip = (project.meta.audio_clips ?? []).find((c) => c.id === clipId);
+      if (!clip) return;
+      const op = buildAudioClipRemoveOp(clip, opLogRef.current.nextIndex);
+      await applyAndPersistMetaOp(applyAudioEdit(project.meta, op), op);
+    },
+    [project, applyAndPersistMetaOp],
+  );
+
+  const setClipGain = useCallback(
+    async (clipId: string, gainDb: number) => {
+      if (!project) return;
+      const clip = (project.meta.audio_clips ?? []).find((c) => c.id === clipId);
+      if (!clip || clip.gain_db === gainDb) return;
+      const op = buildAudioClipSetGainOp(
+        clipId,
+        clip.gain_db,
+        gainDb,
+        opLogRef.current.nextIndex,
+      );
+      await applyAndPersistMetaOp(applyAudioEdit(project.meta, op), op);
+    },
+    [project, applyAndPersistMetaOp],
+  );
+
+  const addMarker = useCallback(
+    async (name: string, position: number): Promise<Marker | null> => {
+      if (!project) return null;
+      const marker = makeMarker(name, position);
+      const op = buildMarkerAddOp(marker, opLogRef.current.nextIndex);
+      await applyAndPersistMetaOp(applyAudioEdit(project.meta, op), op);
+      return marker;
+    },
+    [project, applyAndPersistMetaOp],
+  );
+
+  const removeMarker = useCallback(
+    async (markerId: string) => {
+      if (!project) return;
+      const marker = (project.meta.markers ?? []).find((m) => m.id === markerId);
+      if (!marker) return;
+      const op = buildMarkerRemoveOp(marker, opLogRef.current.nextIndex);
+      await applyAndPersistMetaOp(applyAudioEdit(project.meta, op), op);
+    },
+    [project, applyAndPersistMetaOp],
+  );
+
+  const moveMarker = useCallback(
+    async (markerId: string, position: number) => {
+      if (!project) return;
+      const marker = (project.meta.markers ?? []).find((m) => m.id === markerId);
+      if (!marker || marker.position === position) return;
+      const op = buildMarkerMoveOp(
+        markerId,
+        marker.position,
+        position,
+        opLogRef.current.nextIndex,
+      );
+      await applyAndPersistMetaOp(applyAudioEdit(project.meta, op), op);
+    },
+    [project, applyAndPersistMetaOp],
   );
 
   const replaceScore = useCallback(
@@ -1015,6 +1178,30 @@ export function ScoreEngineProvider({ children }: { children: React.ReactNode })
     if (!opLogRef.current.canUndo()) return;
     const undone = opLogRef.current.undo();
     if (!undone || !undone.inverse) return;
+
+    // Clip/marker edits live in `meta`, not the MusicXML replay — undo them by
+    // applying the inverse to `meta` directly (Phase-5 B2/B5/B7).
+    if (isAudioEditKind(undone.kind)) {
+      setOpVersion((n) => n + 1);
+      if (project) {
+        const inverseOp: OperationRecord = {
+          ...undone.inverse,
+          index: opLogRef.current.nextIndex,
+        };
+        const nextMeta = applyAudioEdit(project.meta, inverseOp);
+        try {
+          await persistProjectSave(
+            { ...project, meta: nextMeta },
+            score?.musicxml ?? project.score_musicxml,
+            inverseOp,
+          );
+        } catch {
+          setIsDirty(true);
+        }
+      }
+      return;
+    }
+
     const state = opLogRef.current.replay({ musicxml: "" });
     const nextXml = state.musicxml || score?.musicxml || "";
     if (!nextXml) return;
@@ -1042,6 +1229,31 @@ export function ScoreEngineProvider({ children }: { children: React.ReactNode })
     if (!opLogRef.current.canRedo()) return;
     const redone = opLogRef.current.redo();
     if (!redone) return;
+
+    // Re-apply a clip/marker edit to `meta` (mirror of the undo branch above).
+    if (isAudioEditKind(redone.kind)) {
+      setOpVersion((n) => n + 1);
+      if (project) {
+        const op: OperationRecord = {
+          ...redone,
+          id: crypto.randomUUID(),
+          index: opLogRef.current.nextIndex,
+          description: redone.description ? `Redo: ${redone.description}` : "Redo",
+        };
+        const nextMeta = applyAudioEdit(project.meta, op);
+        try {
+          await persistProjectSave(
+            { ...project, meta: nextMeta },
+            score?.musicxml ?? project.score_musicxml,
+            op,
+          );
+        } catch {
+          setIsDirty(true);
+        }
+      }
+      return;
+    }
+
     const data = redone.data as { musicxml?: unknown };
     if (typeof data.musicxml !== "string") return;
     const nextXml = data.musicxml;
@@ -1885,6 +2097,12 @@ export function ScoreEngineProvider({ children }: { children: React.ReactNode })
       discardPendingRecovery,
       undo,
       redo,
+      addTakeClip,
+      removeAudioClip,
+      setClipGain,
+      addMarker,
+      removeMarker,
+      moveMarker,
       handleEditorIntent,
       insertNoteAtCursor,
       insertRestAtCursor,
@@ -1977,6 +2195,12 @@ export function ScoreEngineProvider({ children }: { children: React.ReactNode })
       discardPendingRecovery,
       undo,
       redo,
+      addTakeClip,
+      removeAudioClip,
+      setClipGain,
+      addMarker,
+      removeMarker,
+      moveMarker,
       handleEditorIntent,
       insertNoteAtCursor,
       insertRestAtCursor,

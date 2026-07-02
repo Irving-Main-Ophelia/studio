@@ -22,6 +22,8 @@
  */
 
 import type { NoteEvent } from "../lib/api";
+import type { AudioClip } from "../project/types";
+import { dbToLinear, scheduleClips } from "./clipPlayback";
 import { Engine, type PartInstrument, type SamplingMode } from "./Engine";
 import { Mixer, type MixerSnapshot } from "./Mixer";
 
@@ -64,6 +66,11 @@ export class Player {
   private playbackRate = 1;
   private scheduledClicks: AudioBufferSourceNode[] = [];
   private cachedNotes: NoteEvent[] = [];
+  // Audio-clip playback (Phase-5 B1). Takes are decoded once into `clipBuffers`
+  // keyed by take id; `clips` is the canonical clip list from project.json.
+  private clips: AudioClip[] = [];
+  private clipBuffers = new Map<string, AudioBuffer>();
+  private scheduledClipSources: AudioBufferSourceNode[] = [];
 
   constructor(listener: PlayerListener = {}) {
     this.listener = listener;
@@ -140,6 +147,35 @@ export class Player {
     this.loopRegion = region && region.end_sec > region.start_sec ? region : null;
   }
 
+  /* ---- audio-clip playback (Phase-5 B1) --------------------------------- */
+
+  /** Set the canonical clip list (from `project.json.audio_clips`). */
+  setClips(clips: AudioClip[]): void {
+    this.clips = clips;
+  }
+
+  /** Take ids referenced by clips that have not been decoded yet. */
+  missingTakeIds(): string[] {
+    const need = new Set(this.clips.map((c) => c.take_id));
+    for (const id of this.clipBuffers.keys()) need.delete(id);
+    return [...need];
+  }
+
+  /** Decode a take's WAV bytes into an AudioBuffer, keyed by take id. */
+  async loadClipTake(takeId: string, bytes: ArrayBuffer): Promise<void> {
+    const ctx = this.ensureContext();
+    const buffer = await ctx.decodeAudioData(bytes);
+    this.clipBuffers.set(takeId, buffer);
+  }
+
+  /** Drop decoded takes no longer referenced by any clip (bounds RAM). */
+  pruneClipBuffers(): void {
+    const referenced = new Set(this.clips.map((c) => c.take_id));
+    for (const id of [...this.clipBuffers.keys()]) {
+      if (!referenced.has(id)) this.clipBuffers.delete(id);
+    }
+  }
+
   setClick(enabled: boolean): void {
     this.clickEnabled = enabled;
   }
@@ -196,9 +232,50 @@ export class Player {
     }
 
     this.scheduleNotes(notes, this.playStart, this.offsetSec, this.loopRegion);
+    this.scheduleClipPlayback();
 
     this.setStatus("playing");
     this.tick();
+  }
+
+  /**
+   * Schedule every audio clip as a buffer source → gain (with fade envelope) →
+   * mixer master. Positions come from the pure `scheduleClips` (unit-tested); the
+   * Web-Audio wiring here is verified manually (no AudioContext in CI).
+   */
+  private scheduleClipPlayback(): void {
+    if (!this.context || !this.mixer || this.clips.length === 0) return;
+    const scheduled = scheduleClips(this.clips, {
+      playStart: this.playStart,
+      offsetSec: this.offsetSec,
+      rate: this.playbackRate,
+    });
+    const FLOOR = 0.0001; // exponential ramps can't touch 0
+    for (const s of scheduled) {
+      const buffer = this.clipBuffers.get(s.takeId);
+      if (!buffer) continue;
+      const source = this.context.createBufferSource();
+      source.buffer = buffer;
+      const gain = this.context.createGain();
+      const level = Math.max(dbToLinear(s.gainDb), FLOOR);
+      const end = s.when + s.durationSec;
+
+      if (s.fadeInSec > 0) {
+        gain.gain.setValueAtTime(FLOOR, s.when);
+        gain.gain.exponentialRampToValueAtTime(level, s.when + s.fadeInSec);
+      } else {
+        gain.gain.setValueAtTime(level, s.when);
+      }
+      if (s.fadeOutSec > 0) {
+        gain.gain.setValueAtTime(level, Math.max(s.when, end - s.fadeOutSec));
+        gain.gain.exponentialRampToValueAtTime(FLOOR, end);
+      }
+
+      source.connect(gain);
+      gain.connect(this.mixer.destination);
+      source.start(s.when, s.sourceOffsetSec, s.durationSec);
+      this.scheduledClipSources.push(source);
+    }
   }
 
   async playFrom(seconds: number): Promise<void> {
@@ -312,7 +389,7 @@ export class Player {
     // Suspend the AudioContext so future-scheduled Web Audio nodes are silenced
     // immediately. play() calls context.resume() before the next playback.
     void this.context?.suspend();
-    for (const node of this.scheduledClicks) {
+    for (const node of [...this.scheduledClicks, ...this.scheduledClipSources]) {
       try {
         node.stop();
       } catch {
@@ -320,6 +397,7 @@ export class Player {
       }
     }
     this.scheduledClicks = [];
+    this.scheduledClipSources = [];
     if (this.status === "playing") {
       this.setStatus("ready");
       this.listener.onProgress?.(0);

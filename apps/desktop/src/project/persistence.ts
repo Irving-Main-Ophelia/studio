@@ -85,6 +85,8 @@ const browserPersistence = {
         mixer: { tracks: [], master: { gain_db: 0 } },
         agent_state: { last_seen_message_count: 0, pinned_explanations: [] },
         composition_brief: null,
+        audio_clips: [],
+        markers: [],
         last_op_index: spec.initial_operation.index,
       },
       score_musicxml: spec.initial_musicxml,

@@ -4,14 +4,20 @@
 //! - `ping` — sanity check.
 //! - `open_score_file` — native open dialog + read text file (used by File→Open).
 //! - `start_input_meter` / `stop_input_meter` — CPAL audio input level meter.
+//!
+//! Phase 5 (M5.0, B1):
+//! - `start_recording` / `stop_recording` / `recording_status` — native CPAL
+//!   capture to a WAV take in the project's `takes/` (ADR-0022).
 
 use std::fs;
+use std::path::PathBuf;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
 use tauri_plugin_dialog::DialogExt;
 
 use crate::audio::{AudioMeter, MeterStartResponse};
+use crate::recorder::{AudioRecorder, RecordOptions, RecordStartResponse, RecordSummary};
 
 #[tauri::command]
 pub fn ping() -> &'static str {
@@ -71,5 +77,38 @@ pub fn input_meter_status(meter: State<'_, AudioMeter>) -> serde_json::Value {
     serde_json::json!({
         "running": meter.is_running(),
         "device": meter.device(),
+    })
+}
+
+#[derive(Deserialize)]
+pub struct StartRecordingArgs {
+    /// The project folder; the take lands in `<project_path>/takes/`.
+    pub project_path: PathBuf,
+    /// Count-in / punch window (Phase-5 B1). Omitted ⇒ record everything.
+    #[serde(default)]
+    pub options: RecordOptions,
+}
+
+/// Start a native CPAL recording into a new take under the project's `takes/`.
+#[tauri::command]
+pub fn start_recording(
+    app: AppHandle,
+    recorder: State<'_, AudioRecorder>,
+    args: StartRecordingArgs,
+) -> Result<RecordStartResponse, String> {
+    recorder.start(app, args.project_path.join("takes"), args.options)
+}
+
+/// Stop the active recording and return the finished take's metadata.
+#[tauri::command]
+pub fn stop_recording(recorder: State<'_, AudioRecorder>) -> Result<RecordSummary, String> {
+    recorder.stop()
+}
+
+#[tauri::command]
+pub fn recording_status(recorder: State<'_, AudioRecorder>) -> serde_json::Value {
+    serde_json::json!({
+        "running": recorder.is_running(),
+        "take_id": recorder.active_take(),
     })
 }

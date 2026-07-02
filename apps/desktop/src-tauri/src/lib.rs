@@ -9,9 +9,11 @@ use tracing::info;
 mod audio;
 mod commands;
 mod persistence;
+mod recorder;
 mod rubberband;
 
 use audio::AudioMeter;
+use recorder::AudioRecorder;
 
 /// Native app identity. `name` + `version` are authoritative for the built binary
 /// (version from `Cargo.toml`). The roadmap **phase** is intentionally NOT here —
@@ -46,6 +48,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .manage(AudioMeter::default())
+        .manage(AudioRecorder::default())
         .invoke_handler(tauri::generate_handler![
             app_info,
             commands::ping,
@@ -53,6 +56,9 @@ pub fn run() {
             commands::start_input_meter,
             commands::stop_input_meter,
             commands::input_meter_status,
+            commands::start_recording,
+            commands::stop_recording,
+            commands::recording_status,
             persistence::project_new,
             persistence::project_open,
             persistence::project_open_dialog,

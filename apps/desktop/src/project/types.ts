@@ -4,7 +4,7 @@
  * file format is documented in ADR-0009 and `docs/phases/PHASE_1.md` §1.8.
  */
 
-export const PROJECT_SCHEMA_VERSION = 3 as const;
+export const PROJECT_SCHEMA_VERSION = 4 as const;
 
 /** How a part renders (Track A, A1 + A8). "lead" = slash + chord symbols. */
 export type ViewMode = "staff" | "tab" | "both" | "lead";
@@ -75,6 +75,48 @@ export interface AgentState {
   pinned_explanations: string[];
 }
 
+/**
+ * Fade envelope on a clip's edges (schema v4 — ADR-0021). Durations in seconds;
+ * `0` = a hard edge. Crossfade curve/shape is a later additive concern (B3).
+ */
+export interface ClipFades {
+  /** Fade-in length from the clip's start, in seconds. */
+  fade_in: number;
+  /** Fade-out length to the clip's end, in seconds. */
+  fade_out: number;
+}
+
+/**
+ * A non-destructive audio clip: a placement of a `takes/` recording on the
+ * timeline (schema v4 — ADR-0021, promoted from the reserved v2 slot). The take
+ * file is immutable; a clip only references it. `offset`/`length` are in seconds
+ * (`offset` = timeline start, what "move" edits; `length` = how long it sounds).
+ */
+export interface AudioClip {
+  id: string;
+  /** Id of the take in `takes/` this clip plays. */
+  take_id: string;
+  /** Timeline start position, seconds from the song origin. */
+  offset: number;
+  /** Clip length, in seconds. */
+  length: number;
+  /** Per-clip gain in dB (B5), independent of Phase-6 track automation. */
+  gain_db: number;
+  /** Fade envelope on this clip's edges (B3). */
+  fades: ClipFades;
+}
+
+/**
+ * A named song-position marker / memory location (schema v4 — ADR-0021,
+ * promoted from the reserved v2 slot). B7 recalls/jumps and loops between two.
+ */
+export interface Marker {
+  id: string;
+  name: string;
+  /** Song position, seconds from the origin. */
+  position: number;
+}
+
 export interface ProjectMeta {
   schema_version: number;
   id: string;
@@ -93,6 +135,14 @@ export interface ProjectMeta {
   mixer: MixerState;
   agent_state: AgentState;
   composition_brief: string | null;
+  /**
+   * Track B — non-destructive audio clips referencing `takes/` (schema v4,
+   * ADR-0021). Absent/empty on a project with no audio. Optional here because
+   * `meta` round-trips opaquely through Rust; UI consumers land in B2.
+   */
+  audio_clips?: AudioClip[];
+  /** Track B — named song-position markers (schema v4, ADR-0021). See B7. */
+  markers?: Marker[];
   /** Index of the last operation folded into `score.musicxml`. `-1` = brand new. */
   last_op_index: number;
 }
@@ -108,7 +158,14 @@ export type OperationKind =
   | "score_init"
   | "score_replace"
   | "score_transpose"
-  | "score_meta_update";
+  | "score_meta_update"
+  // Phase-5 audio edits (clips/markers live in `meta`, not the MusicXML body).
+  | "audio_clip_add"
+  | "audio_clip_remove"
+  | "audio_clip_set_gain"
+  | "marker_add"
+  | "marker_remove"
+  | "marker_move";
 
 export interface OperationRecord {
   id: string;

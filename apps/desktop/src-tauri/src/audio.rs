@@ -3,8 +3,9 @@
 //! Opens the default macOS input device, computes an RMS-based peak each
 //! ~33 ms, and emits an `audio:meter` event with `{ peak: f32, rms: f32 }`.
 //!
-//! Phase 1 swaps this for real capture buffers feeding a Rust ringbuffer
-//! that the AudioWorklet bridge consumes.
+//! This is *metering only* — it never keeps the samples. Real capture (the
+//! ringbuffer → WAV take path) lives in its sibling [`crate::recorder`]
+//! (Phase-5 B1, ADR-0022); the two share the same CPAL device-open idiom.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;

@@ -101,8 +101,9 @@ applicable and has a test.
 
 **General**
 
-- [ ] **Schema v4**: real typed `audio_clips` + `markers` shapes + a lossless v3→v4 migrator (reuse the
-      `persistence.rs::migrate_meta` pattern). ADR-0021.
+- [x] **Schema v4**: real typed `audio_clips` + `markers` shapes + a lossless v3→v4 migrator (reuse the
+      `persistence.rs::migrate_meta` pattern). ADR-0021. *(Done — `persistence.rs` tests
+      `round_trips_audio_clips_and_markers`, `migrates_v3_project_to_v4_and_preserves_reserved_slots`.)*
 - [ ] ADRs written: **0021** (schema v4) + **0022** (native CPAL recording path) + **0023** (Rubber Band
       GPL FFI) + **0024** (wavesurfer as display-only waveform UI).
 - [ ] `git tag v0.5.0-audio` once every box is checked and round-trips with tests.
